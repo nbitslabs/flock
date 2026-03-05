@@ -42,8 +42,8 @@ func main() {
 	broker := server.NewSSEBroker()
 
 	// Create instance manager
-	manager := opencode.NewManager(queries, func(instanceID, eventType, data string) {
-		broker.Broadcast(instanceID, eventType, data)
+	manager := opencode.NewManager(queries, func(instanceID, rawJSON string) {
+		broker.HandleEvent(instanceID, rawJSON)
 	})
 
 	// Create HTTP server

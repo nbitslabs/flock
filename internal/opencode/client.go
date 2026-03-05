@@ -110,9 +110,10 @@ func (c *Client) SendMessage(ctx context.Context, sessionID string, content stri
 	return nil
 }
 
-// SubscribeEvents opens an SSE connection to the OpenCode instance event stream.
-// It calls the handler for each event. Blocks until context is cancelled or stream ends.
-func (c *Client) SubscribeEvents(ctx context.Context, handler func(eventType, data string)) error {
+// SubscribeEvents opens an SSE connection to the OpenCode /event endpoint.
+// OpenCode sends events as `data: {"type":"...", "properties":{...}}` lines.
+// Blocks until context is cancelled or the stream ends.
+func (c *Client) SubscribeEvents(ctx context.Context, handler func(rawJSON string)) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/event", nil)
 	if err != nil {
 		return err
@@ -125,20 +126,13 @@ func (c *Client) SubscribeEvents(ctx context.Context, handler func(eventType, da
 	defer resp.Body.Close()
 
 	scanner := bufio.NewScanner(resp.Body)
-	var eventType, data string
+	// OpenCode can send large events (tool results etc), increase buffer
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			data = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		case line == "":
-			if eventType != "" || data != "" {
-				handler(eventType, data)
-				eventType = ""
-				data = ""
-			}
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			handler(data)
 		}
 	}
 	return scanner.Err()

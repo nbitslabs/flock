@@ -1,31 +1,100 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 )
 
-// SSEClient represents a connected SSE client.
-type SSEClient struct {
-	id       string
-	messages chan string
-	done     chan struct{}
-}
-
-// SSEBroker manages SSE client connections and event broadcasting.
+// SSEBroker manages per-session SSE connections to web UI clients.
 type SSEBroker struct {
-	mu      sync.RWMutex
-	clients map[string]*SSEClient
+	mu sync.RWMutex
+	// sessionID -> set of client channels
+	clients map[string]map[chan string]struct{}
 }
 
 func NewSSEBroker() *SSEBroker {
 	return &SSEBroker{
-		clients: make(map[string]*SSEClient),
+		clients: make(map[string]map[chan string]struct{}),
 	}
 }
 
-// ServeHTTP handles SSE connections for a specific session.
+func (b *SSEBroker) subscribe(sessionID string) chan string {
+	ch := make(chan string, 128)
+	b.mu.Lock()
+	if b.clients[sessionID] == nil {
+		b.clients[sessionID] = make(map[chan string]struct{})
+	}
+	b.clients[sessionID][ch] = struct{}{}
+	b.mu.Unlock()
+	return ch
+}
+
+func (b *SSEBroker) unsubscribe(sessionID string, ch chan string) {
+	b.mu.Lock()
+	if subs, ok := b.clients[sessionID]; ok {
+		delete(subs, ch)
+		if len(subs) == 0 {
+			delete(b.clients, sessionID)
+		}
+	}
+	b.mu.Unlock()
+}
+
+func (b *SSEBroker) sendToSession(sessionID string, msg string) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for ch := range b.clients[sessionID] {
+		select {
+		case ch <- msg:
+		default:
+			// drop if client is slow
+		}
+	}
+}
+
+// HandleEvent receives a raw JSON event from an OpenCode instance and
+// routes it to the correct session's subscribers.
+func (b *SSEBroker) HandleEvent(instanceID, rawJSON string) {
+	// Parse just enough to extract session ID and event type
+	var envelope struct {
+		Type       string `json:"type"`
+		Properties struct {
+			SessionID string `json:"sessionID"`
+			Info      struct {
+				ID        string `json:"id"`
+				SessionID string `json:"sessionID"`
+			} `json:"info"`
+			Part struct {
+				SessionID string `json:"sessionID"`
+			} `json:"part"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &envelope); err != nil {
+		return
+	}
+
+	// Extract sessionID from whichever field has it
+	sessionID := envelope.Properties.SessionID
+	if sessionID == "" {
+		sessionID = envelope.Properties.Info.SessionID
+	}
+	if sessionID == "" {
+		sessionID = envelope.Properties.Part.SessionID
+	}
+	if sessionID == "" {
+		// server-level events (heartbeat etc) — skip
+		return
+	}
+
+	// Forward as SSE data line to matching session subscribers
+	msg := fmt.Sprintf("data: %s\n\n", rawJSON)
+	b.sendToSession(sessionID, msg)
+}
+
+// ServeHTTP handles an SSE connection for a specific session.
 func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request, sessionID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -36,52 +105,29 @@ func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request, sessionID 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	client := &SSEClient{
-		id:       sessionID + "-" + r.RemoteAddr,
-		messages: make(chan string, 64),
-		done:     make(chan struct{}),
-	}
+	ch := b.subscribe(sessionID)
+	defer b.unsubscribe(sessionID, ch)
 
-	b.mu.Lock()
-	b.clients[client.id] = client
-	b.mu.Unlock()
-
-	defer func() {
-		b.mu.Lock()
-		delete(b.clients, client.id)
-		b.mu.Unlock()
-		close(client.done)
-	}()
-
-	// Send initial connected event
-	fmt.Fprintf(w, "event: connected\ndata: {\"sessionId\":%q}\n\n", sessionID)
+	// Send connected event
+	fmt.Fprintf(w, "data: {\"type\":\"connected\",\"properties\":{\"sessionID\":%q}}\n\n", sessionID)
 	flusher.Flush()
+
+	log.Printf("SSE client connected for session %s", sessionID[:min(len(sessionID), 12)])
 
 	for {
 		select {
-		case msg := <-client.messages:
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
 			fmt.Fprint(w, msg)
 			flusher.Flush()
 		case <-r.Context().Done():
+			log.Printf("SSE client disconnected for session %s", sessionID[:min(len(sessionID), 12)])
 			return
-		}
-	}
-}
-
-// Broadcast sends an event to all connected clients.
-func (b *SSEBroker) Broadcast(instanceID, eventType, data string) {
-	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)
-
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	for _, client := range b.clients {
-		select {
-		case client.messages <- msg:
-		default:
-			// Drop message if client buffer is full
 		}
 	}
 }

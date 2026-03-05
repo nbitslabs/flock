@@ -29,7 +29,8 @@ type Instance struct {
 }
 
 // EventHandler is called when an SSE event arrives from an OpenCode instance.
-type EventHandler func(instanceID, eventType, data string)
+// rawJSON is the full JSON object: {"type":"...", "properties":{...}}
+type EventHandler func(instanceID, rawJSON string)
 
 // Manager manages OpenCode ACP instance lifecycles.
 type Manager struct {
@@ -157,9 +158,9 @@ func (m *Manager) subscribeEvents(inst *Instance) {
 	}
 
 	for {
-		err := client.SubscribeEvents(context.Background(), func(eventType, data string) {
+		err := client.SubscribeEvents(context.Background(), func(rawJSON string) {
 			if m.eventHandler != nil {
-				m.eventHandler(inst.ID, eventType, data)
+				m.eventHandler(inst.ID, rawJSON)
 			}
 		})
 		if err != nil {

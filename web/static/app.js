@@ -7,10 +7,15 @@ const state = {
     selectedSession: null,
     messages: [],
     eventSource: null,
-    streaming: false,
+    // Streaming state: tracks in-flight assistant message parts
+    // partID -> { messageID, type, text }
+    streamingParts: {},
+    streamingMessageID: null,
+    busy: false,
 };
 
-// API helpers
+// --- API ---
+
 async function api(method, path, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
@@ -23,7 +28,8 @@ async function api(method, path, body) {
     return resp.json();
 }
 
-// Instance operations
+// --- Instances ---
+
 async function loadInstances() {
     state.instances = await api('GET', '/api/instances') || [];
     renderInstances();
@@ -49,7 +55,8 @@ async function deleteInstance(id) {
     await loadInstances();
 }
 
-// Session operations
+// --- Sessions ---
+
 async function loadSessions(instanceId) {
     state.sessions = await api('GET', `/api/instances/${instanceId}/sessions`) || [];
     renderSessions();
@@ -71,21 +78,43 @@ async function createSession(instanceId) {
     }
 }
 
+// --- Messages ---
+
 async function loadMessages(sessionId) {
-    state.messages = await api('GET', `/api/sessions/${sessionId}/messages`) || [];
+    const msgs = await api('GET', `/api/sessions/${sessionId}/messages`) || [];
+    state.messages = msgs;
+    state.streamingParts = {};
+    state.streamingMessageID = null;
     renderMessages();
 }
 
 async function sendMessage(sessionId, content) {
-    await api('POST', `/api/sessions/${sessionId}/messages`, { content });
-    // Messages will arrive via SSE
+    // Optimistically add user message to UI
+    state.messages.push({
+        info: { id: 'pending-' + Date.now(), role: 'user', time: { created: Date.now() } },
+        parts: [{ type: 'text', text: content }],
+    });
+    state.busy = true;
+    renderMessages();
+    updateSendButton();
+
+    try {
+        await api('POST', `/api/sessions/${sessionId}/messages`, { content });
+    } catch (err) {
+        console.error('send failed:', err);
+        state.busy = false;
+        updateSendButton();
+    }
+    // Real response arrives via SSE
 }
 
-// Selection
+// --- Selection ---
+
 function selectInstance(id) {
     state.selectedInstance = id;
     state.selectedSession = null;
     state.messages = [];
+    state.streamingParts = {};
     renderInstances();
     renderMessages();
     updateHeader();
@@ -102,53 +131,141 @@ function selectSession(id) {
     subscribeEvents(id);
 }
 
-// SSE
+// --- SSE Event Handling ---
+
 function subscribeEvents(sessionId) {
     if (state.eventSource) {
         state.eventSource.close();
     }
+
     state.eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
 
-    state.eventSource.addEventListener('message.part.updated', (e) => {
-        const data = JSON.parse(e.data);
-        handleStreamingUpdate(data);
-    });
-
-    state.eventSource.addEventListener('session.updated', (e) => {
-        loadMessages(sessionId);
-    });
-
-    state.eventSource.addEventListener('session.idle', () => {
-        state.streaming = false;
-        loadMessages(sessionId);
-    });
+    state.eventSource.onmessage = (e) => {
+        try {
+            const event = JSON.parse(e.data);
+            handleEvent(event);
+        } catch (err) {
+            // ignore parse errors (heartbeats etc)
+        }
+    };
 
     state.eventSource.onerror = () => {
-        console.warn('SSE connection error, will retry...');
+        console.warn('SSE connection error, will auto-retry');
     };
 }
 
-function handleStreamingUpdate(data) {
-    state.streaming = true;
-    const messagesEl = document.getElementById('messages');
-    let streamEl = document.getElementById('streaming-message');
-    if (!streamEl) {
-        streamEl = document.createElement('div');
-        streamEl.id = 'streaming-message';
-        streamEl.className = 'flex justify-start';
-        streamEl.innerHTML = '<div class="max-w-2xl bg-gray-800 rounded-lg px-4 py-3 text-gray-100"><pre class="whitespace-pre-wrap font-mono text-sm"></pre></div>';
-        messagesEl.appendChild(streamEl);
+function handleEvent(event) {
+    const type = event.type;
+    const props = event.properties || {};
+
+    switch (type) {
+        case 'message.updated':
+            handleMessageUpdated(props);
+            break;
+        case 'message.part.updated':
+            handlePartUpdated(props);
+            break;
+        case 'message.part.delta':
+            handlePartDelta(props);
+            break;
+        case 'session.status':
+            handleSessionStatus(props);
+            break;
+        case 'session.updated':
+            handleSessionUpdated(props);
+            break;
+        case 'session.idle':
+            handleSessionIdle(props);
+            break;
     }
-    const pre = streamEl.querySelector('pre');
-    if (data.content) {
-        pre.textContent = data.content;
-    } else if (data.text) {
-        pre.textContent = data.text;
-    }
-    messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// Rendering
+function handleMessageUpdated(props) {
+    const info = props.info;
+    if (!info) return;
+
+    // If this is a new assistant message, track it for streaming
+    if (info.role === 'assistant' && !info.time?.completed) {
+        state.streamingMessageID = info.id;
+    }
+
+    // If the message is completed, do a full refresh
+    if (info.time?.completed) {
+        if (info.id === state.streamingMessageID) {
+            state.streamingMessageID = null;
+            state.streamingParts = {};
+        }
+    }
+}
+
+function handlePartUpdated(props) {
+    const part = props.part;
+    if (!part) return;
+
+    // Store/update the part snapshot
+    state.streamingParts[part.id] = {
+        messageID: part.messageID,
+        type: part.type,
+        text: part.text || '',
+    };
+    renderStreamingMessage();
+}
+
+function handlePartDelta(props) {
+    const partID = props.partID;
+    const delta = props.delta;
+    const field = props.field;
+    if (!partID || delta === undefined || field !== 'text') return;
+
+    if (!state.streamingParts[partID]) {
+        state.streamingParts[partID] = {
+            messageID: props.messageID,
+            type: 'text',
+            text: '',
+        };
+    }
+    state.streamingParts[partID].text += delta;
+    renderStreamingMessage();
+}
+
+function handleSessionStatus(props) {
+    if (props.status?.type === 'idle') {
+        state.busy = false;
+        updateSendButton();
+        // Full reload to get final state
+        if (state.selectedSession) {
+            loadMessages(state.selectedSession);
+        }
+    } else if (props.status?.type === 'busy') {
+        state.busy = true;
+        updateSendButton();
+    }
+}
+
+function handleSessionUpdated(props) {
+    const info = props.info;
+    if (!info) return;
+    // Update session title in sidebar
+    const sess = state.sessions.find(s => s.id === info.id);
+    if (sess && info.title) {
+        sess.title = info.title;
+        renderSessions();
+        if (state.selectedSession === info.id) {
+            updateHeader();
+        }
+    }
+}
+
+function handleSessionIdle() {
+    state.busy = false;
+    updateSendButton();
+    if (state.selectedSession) {
+        loadMessages(state.selectedSession);
+    }
+}
+
+// --- Rendering ---
+
 function renderInstances() {
     const list = document.getElementById('instance-list');
     if (!state.instances.length) {
@@ -186,10 +303,10 @@ function renderSessions() {
         const title = sess.title || sess.Title || 'Untitled';
         const selected = id === state.selectedSession;
         return `
-            <div class="px-2 py-1.5 rounded cursor-pointer text-sm truncate ${selected ? 'bg-gray-700' : 'hover:bg-gray-800'}"
+            <div class="px-2 py-1.5 rounded cursor-pointer text-sm truncate ${selected ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}"
                  onclick="selectSession('${id}')"
                  title="${title}">
-                ${title || id.slice(0, 8)}
+                ${title}
             </div>
         `;
     }).join('');
@@ -201,55 +318,123 @@ function renderMessages() {
         container.innerHTML = '<div class="flex items-center justify-center h-full text-gray-600"><p>No messages yet.</p></div>';
         return;
     }
-    container.innerHTML = state.messages.map(msg => {
-        // OpenCode returns { info: { role, ... }, parts: [...] }
-        const role = msg.info?.role || msg.role || 'assistant';
-        const isUser = role === 'user';
-        const align = isUser ? 'justify-end' : 'justify-start';
-        const bg = isUser ? 'bg-blue-600' : 'bg-gray-800';
-        const content = getMessageContent(msg);
-        return `
-            <div class="flex ${align}">
-                <div class="max-w-2xl ${bg} rounded-lg px-4 py-3 text-gray-100">
-                    <pre class="whitespace-pre-wrap font-mono text-sm">${escapeHtml(content)}</pre>
-                </div>
-            </div>
-        `;
-    }).join('');
-    container.scrollTop = container.scrollHeight;
+    const html = state.messages.map(msg => renderMessage(msg)).join('');
+    container.innerHTML = html;
+    // Append streaming message if exists
+    renderStreamingMessage();
+    scrollToBottom();
 }
 
-function getMessageContent(msg) {
+function renderMessage(msg) {
+    const role = msg.info?.role || msg.role || 'assistant';
+    const isUser = role === 'user';
     const parts = msg.parts || [];
-    if (!parts.length) return msg.content || '';
-    return parts.map(p => {
-        if (p.type === 'text') return p.text || p.content || '';
-        if (p.type === 'tool-invocation') return `[Tool: ${p.toolName || 'unknown'}]`;
-        if (p.type === 'tool-result') return '';
-        return p.text || p.content || '';
+
+    const content = parts.map(p => {
+        if (p.type === 'text') return escapeHtml(p.text || p.content || '');
+        if (p.type === 'tool-invocation' || p.type === 'tool-call') {
+            const name = p.toolName || p.name || 'tool';
+            return `<span class="text-yellow-400">[${escapeHtml(name)}]</span>`;
+        }
+        if (p.type === 'reasoning') {
+            const text = p.text || '';
+            if (!text) return '';
+            return `<span class="text-gray-500 italic">${escapeHtml(text)}</span>`;
+        }
+        return '';
     }).filter(Boolean).join('\n');
+
+    if (!content) return '';
+
+    const align = isUser ? 'justify-end' : 'justify-start';
+    const bg = isUser ? 'bg-blue-600' : 'bg-gray-800';
+
+    return `
+        <div class="flex ${align}">
+            <div class="max-w-3xl ${bg} rounded-lg px-4 py-3">
+                <pre class="whitespace-pre-wrap font-mono text-sm leading-relaxed">${content}</pre>
+            </div>
+        </div>
+    `;
 }
 
-function escapeHtml(str) {
+function renderStreamingMessage() {
+    const container = document.getElementById('messages');
+    // Remove old streaming element
+    const old = document.getElementById('streaming-msg');
+    if (old) old.remove();
+
+    // Collect streaming parts in order
+    const parts = Object.values(state.streamingParts);
+    if (!parts.length) return;
+
+    // Build content from parts
+    const textParts = parts.filter(p => p.type === 'text' && p.text);
+    const reasoningParts = parts.filter(p => p.type === 'reasoning' && p.text);
+
+    let content = '';
+    if (reasoningParts.length) {
+        content += `<span class="text-gray-500 italic">${escapeHtml(reasoningParts.map(p => p.text).join(''))}</span>\n`;
+    }
+    if (textParts.length) {
+        content += escapeHtml(textParts.map(p => p.text).join(''));
+    }
+
+    if (!content.trim()) return;
+
     const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    div.id = 'streaming-msg';
+    div.className = 'flex justify-start';
+    div.innerHTML = `
+        <div class="max-w-3xl bg-gray-800 rounded-lg px-4 py-3 border border-gray-700">
+            <pre class="whitespace-pre-wrap font-mono text-sm leading-relaxed">${content}</pre>
+            ${state.busy ? '<div class="mt-2"><span class="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span></div>' : ''}
+        </div>
+    `;
+    container.appendChild(div);
+    scrollToBottom();
+}
+
+function scrollToBottom() {
+    const container = document.getElementById('messages');
+    container.scrollTop = container.scrollHeight;
 }
 
 function updateHeader() {
     const header = document.getElementById('main-header');
     if (state.selectedSession) {
         const sess = state.sessions.find(s => (s.id || s.ID) === state.selectedSession);
-        header.textContent = `Session: ${sess?.title || sess?.Title || state.selectedSession.slice(0, 8)}`;
+        header.textContent = sess?.title || sess?.Title || 'Session';
     } else if (state.selectedInstance) {
         const inst = state.instances.find(i => i.id === state.selectedInstance);
-        header.textContent = `Instance: ${inst?.working_directory || state.selectedInstance.slice(0, 8)}`;
+        header.textContent = `Instance: ${inst?.working_directory || ''}`;
     } else {
         header.textContent = 'Select an instance to get started';
     }
 }
 
-// Event listeners
+function updateSendButton() {
+    const btn = document.getElementById('btn-send');
+    const input = document.getElementById('message-input');
+    if (state.busy) {
+        btn.disabled = true;
+        btn.textContent = 'Working...';
+        input.disabled = true;
+    } else {
+        btn.disabled = false;
+        btn.textContent = 'Send';
+        input.disabled = false;
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+
+// --- Event listeners ---
+
 document.getElementById('btn-new-instance').addEventListener('click', () => {
     document.getElementById('modal-new-instance').classList.remove('hidden');
     document.getElementById('input-workdir').focus();
@@ -276,7 +461,7 @@ document.getElementById('btn-new-session').addEventListener('click', () => {
 document.getElementById('btn-send').addEventListener('click', () => {
     const input = document.getElementById('message-input');
     const content = input.value.trim();
-    if (!content || !state.selectedSession) return;
+    if (!content || !state.selectedSession || state.busy) return;
     input.value = '';
     sendMessage(state.selectedSession, content);
 });
@@ -294,8 +479,6 @@ document.getElementById('input-workdir').addEventListener('keydown', (e) => {
     }
 });
 
-// Initial load
+// --- Init ---
 loadInstances();
-
-// Poll for instance status updates
 setInterval(loadInstances, 5000);
