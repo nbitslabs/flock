@@ -1,0 +1,33 @@
+# Binaries
+bin/
+fundbot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependencies
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Nix/devenv
+.devenv
+
+# Project secrets/data
+config.json
+*.db
+data/
+.env
