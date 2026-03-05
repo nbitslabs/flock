@@ -10,7 +10,7 @@ clean:
 	rm -rf bin/
 
 css:
-	tailwindcss -i web/input.css -o web/static/styles.css --minify 2>/dev/null || true
+	tailwindcss -i web/input.css -o web/static/styles.css --minify -c web/tailwind.config.js
 
 sqlc:
 	sqlc generate
