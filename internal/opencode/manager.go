@@ -47,7 +47,8 @@ func NewManager(queries *sqlc.Queries, handler EventHandler) *Manager {
 	}
 }
 
-var portRegexp = regexp.MustCompile(`(?:listening|server|http|started).*?(?:on|at)\s+(?:http://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
+// Matches: "opencode server listening on http://127.0.0.1:19876"
+var portRegexp = regexp.MustCompile(`listening on http://(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
 
 // Spawn starts a new OpenCode ACP instance for the given working directory.
 func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, error) {
@@ -60,7 +61,7 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 	}
 
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, "opencode", "acp")
+	cmd := exec.CommandContext(procCtx, "opencode", "serve")
 	cmd.Dir = workingDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// Client communicates with a single OpenCode ACP instance.
+// Client communicates with a single OpenCode server instance.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -25,7 +25,7 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/sessions", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 
 func (c *Client) CreateSession(ctx context.Context) (*Session, error) {
 	body, _ := json.Marshal(CreateSessionRequest{})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/sessions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (c *Client) CreateSession(ctx context.Context) (*Session, error) {
 }
 
 func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/sessions/"+sessionID+"/messages", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/"+sessionID+"/message", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,10 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, 
 }
 
 func (c *Client) SendMessage(ctx context.Context, sessionID string, content string) error {
-	body, _ := json.Marshal(SendMessageRequest{Content: content})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/sessions/"+sessionID+"/messages", bytes.NewReader(body))
+	body, _ := json.Marshal(SendMessageRequest{
+		Parts: []SendPart{{Type: "text", Text: content}},
+	})
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session/"+sessionID+"/message", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -111,7 +113,7 @@ func (c *Client) SendMessage(ctx context.Context, sessionID string, content stri
 // SubscribeEvents opens an SSE connection to the OpenCode instance event stream.
 // It calls the handler for each event. Blocks until context is cancelled or stream ends.
 func (c *Client) SubscribeEvents(ctx context.Context, handler func(eventType, data string)) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/events", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/event", nil)
 	if err != nil {
 		return err
 	}

@@ -1,29 +1,41 @@
 package opencode
 
-// OpenCode ACP API types
+// OpenCode API types — matches the actual opencode serve API responses
+
+type SessionTime struct {
+	Created int64 `json:"created"`
+	Updated int64 `json:"updated"`
+}
 
 type Session struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	ID        string      `json:"id"`
+	Slug      string      `json:"slug,omitempty"`
+	Title     string      `json:"title"`
+	Directory string      `json:"directory,omitempty"`
+	Version   string      `json:"version,omitempty"`
+	ProjectID string      `json:"projectID,omitempty"`
+	Time      SessionTime `json:"time"`
 }
 
-type SessionListResponse struct {
-	Sessions []Session `json:"sessions"`
+type CreateSessionRequest struct{}
+
+type MessageTime struct {
+	Created   int64 `json:"created"`
+	Completed int64 `json:"completed,omitempty"`
 }
 
-type CreateSessionRequest struct {
-	Title string `json:"title,omitempty"`
+type MessageInfo struct {
+	ID         string      `json:"id"`
+	Role       string      `json:"role"`
+	ParentID   string      `json:"parentID,omitempty"`
+	ModelID    string      `json:"modelID,omitempty"`
+	ProviderID string      `json:"providerID,omitempty"`
+	Time       MessageTime `json:"time"`
 }
 
 type Message struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionId"`
-	Role      string `json:"role"`
-	Parts     []Part `json:"parts"`
-	CreatedAt int64  `json:"createdAt"`
+	Info  MessageInfo `json:"info"`
+	Parts []Part      `json:"parts"`
 }
 
 type Part struct {
@@ -32,15 +44,11 @@ type Part struct {
 	Text    string `json:"text,omitempty"`
 }
 
-type MessageListResponse struct {
-	Messages []Message `json:"messages"`
-}
-
 type SendMessageRequest struct {
-	Content string `json:"content"`
+	Parts []SendPart `json:"parts"`
 }
 
-type Event struct {
+type SendPart struct {
 	Type string `json:"type"`
-	Data any    `json:"data,omitempty"`
+	Text string `json:"text"`
 }

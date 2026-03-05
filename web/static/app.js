@@ -56,9 +56,19 @@ async function loadSessions(instanceId) {
 }
 
 async function createSession(instanceId) {
-    const session = await api('POST', `/api/instances/${instanceId}/sessions`);
-    await loadSessions(instanceId);
-    selectSession(session.id);
+    const inst = state.instances.find(i => i.id === instanceId);
+    if (inst && inst.status !== 'running') {
+        alert(`Instance is still ${inst.status}. Wait for it to be running.`);
+        return;
+    }
+    try {
+        const session = await api('POST', `/api/instances/${instanceId}/sessions`);
+        await loadSessions(instanceId);
+        selectSession(session.id);
+    } catch (err) {
+        console.error('create session failed:', err);
+        alert('Failed to create session: ' + err.message);
+    }
 }
 
 async function loadMessages(sessionId) {
@@ -192,7 +202,9 @@ function renderMessages() {
         return;
     }
     container.innerHTML = state.messages.map(msg => {
-        const isUser = msg.role === 'user';
+        // OpenCode returns { info: { role, ... }, parts: [...] }
+        const role = msg.info?.role || msg.role || 'assistant';
+        const isUser = role === 'user';
         const align = isUser ? 'justify-end' : 'justify-start';
         const bg = isUser ? 'bg-blue-600' : 'bg-gray-800';
         const content = getMessageContent(msg);
@@ -208,8 +220,14 @@ function renderMessages() {
 }
 
 function getMessageContent(msg) {
-    if (!msg.parts || !msg.parts.length) return msg.content || '';
-    return msg.parts.map(p => p.content || p.text || '').join('');
+    const parts = msg.parts || [];
+    if (!parts.length) return msg.content || '';
+    return parts.map(p => {
+        if (p.type === 'text') return p.text || p.content || '';
+        if (p.type === 'tool-invocation') return `[Tool: ${p.toolName || 'unknown'}]`;
+        if (p.type === 'tool-result') return '';
+        return p.text || p.content || '';
+    }).filter(Boolean).join('\n');
 }
 
 function escapeHtml(str) {
