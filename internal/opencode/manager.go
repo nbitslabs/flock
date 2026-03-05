@@ -38,13 +38,23 @@ type Manager struct {
 	instances    map[string]*Instance
 	queries      *sqlc.Queries
 	eventHandler EventHandler
+	opencodePath string
 }
 
 func NewManager(queries *sqlc.Queries, handler EventHandler) *Manager {
+	// Resolve opencode binary path at startup
+	path, err := exec.LookPath("opencode")
+	if err != nil {
+		log.Printf("WARNING: opencode not found in PATH, using 'opencode': %v", err)
+		path = "opencode"
+	} else {
+		log.Printf("opencode found at %s", path)
+	}
 	return &Manager{
 		instances:    make(map[string]*Instance),
 		queries:      queries,
 		eventHandler: handler,
+		opencodePath: path,
 	}
 }
 
@@ -62,7 +72,7 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 	}
 
 	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, "opencode", "serve")
+	cmd := exec.CommandContext(procCtx, m.opencodePath, "serve")
 	cmd.Dir = workingDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
