@@ -19,6 +19,7 @@
         eventSource: null,
         _instanceHash: '',
         _lastSentText: null,  // track user message to filter streaming echoes
+        _sessionHash: '',
     };
 
     // =========================================================================
@@ -81,7 +82,7 @@
     async function refreshInstances() {
         try {
             const list = await api('GET', '/api/instances') || [];
-            const hash = JSON.stringify(list.map(i => [i.id, i.status, i.working_directory]));
+            const hash = JSON.stringify(list.map(i => [i.id, i.status, i.working_directory, i.last_heartbeat_at]));
             if (hash === store._instanceHash) return;
             store._instanceHash = hash;
             store.instances.clear();
@@ -117,9 +118,23 @@
         try {
             const list = await api('GET', `/api/instances/${instanceId}/sessions`) || [];
             store.sessions.clear();
+            store._sessionHash = '';
             for (const s of list) store.sessions.set(s.id, s);
         } catch (e) { console.error('loadSessions:', e); store.sessions.clear(); }
         renderSessions();
+    }
+
+    async function refreshSessions() {
+        if (!store.selectedInstanceId) return;
+        try {
+            const list = await api('GET', `/api/instances/${store.selectedInstanceId}/sessions`) || [];
+            const hash = JSON.stringify(list.map(s => [s.id, s.title]));
+            if (hash === store._sessionHash) return;
+            store._sessionHash = hash;
+            store.sessions.clear();
+            for (const s of list) store.sessions.set(s.id, s);
+            renderSessions();
+        } catch (e) { console.error('refreshSessions:', e); }
     }
 
     async function createSession(instanceId) {
@@ -367,8 +382,15 @@
         return texts.join('\n');
     }
 
-    /** Normalize timestamp to milliseconds (handles both seconds and milliseconds) */
+    /** Normalize timestamp to milliseconds (handles both seconds, milliseconds, and ISO date strings) */
     function normalizeTs(t) {
+        if (!t) return 0;
+        // Handle ISO date strings from SQLite
+        if (typeof t === 'string') {
+            const d = new Date(t);
+            if (!isNaN(d.getTime())) return d.getTime();
+            return 0;
+        }
         const n = Number(t);
         if (!n) return 0;
         // If < 1e12 it's seconds; otherwise milliseconds
@@ -387,6 +409,22 @@
             return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
         }
         return time;
+    }
+
+    function formatRelativeTime(ts) {
+        if (!ts) return '';
+        const ms = normalizeTs(ts);
+        if (!ms) return '';
+        const now = Date.now();
+        const diff = now - ms;
+        const seconds = Math.floor(diff / 1000);
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
     }
 
     function renderMessages() {
@@ -739,6 +777,11 @@
         });
         div.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0` }));
         div.appendChild(h('span', { className: 'text-sm truncate flex-1', textContent: inst.working_directory.split('/').pop() || inst.working_directory, title: inst.working_directory }));
+        if (inst.last_heartbeat_at) {
+            const relativeTime = formatRelativeTime(inst.last_heartbeat_at);
+            const exactTime = formatTime(inst.last_heartbeat_at);
+            div.appendChild(h('span', { className: 'text-xs text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
+        }
         div.appendChild(h('button', {
             className: 'text-gray-500 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
             'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
@@ -751,6 +794,27 @@
         el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-700' : 'hover:bg-gray-800'}`;
         const dot = el.querySelector('span:first-child');
         if (dot) dot.className = `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0`;
+        const children = Array.from(el.children);
+        const textEl = children[1];
+        if (textEl) {
+            textEl.textContent = inst.working_directory.split('/').pop() || inst.working_directory;
+            textEl.title = inst.working_directory;
+        }
+        let hbEl = children[2];
+        if (inst.last_heartbeat_at) {
+            const relativeTime = formatRelativeTime(inst.last_heartbeat_at);
+            const exactTime = formatTime(inst.last_heartbeat_at);
+            if (hbEl && hbEl.tagName === 'SPAN' && !hbEl.dataset.action) {
+                hbEl.textContent = relativeTime;
+                hbEl.title = exactTime;
+            } else {
+                hbEl = h('span', { className: 'text-xs text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime });
+                if (children[2]) el.insertBefore(hbEl, children[2]);
+                else el.appendChild(hbEl);
+            }
+        } else if (hbEl && hbEl.tagName === 'SPAN' && !hbEl.dataset.action) {
+            hbEl.remove();
+        }
     }
 
     function statusColor(s) {
@@ -960,4 +1024,5 @@
     initResize();
     refreshInstances();
     setInterval(refreshInstances, 5000);
+    setInterval(refreshSessions, 5000);
 })();

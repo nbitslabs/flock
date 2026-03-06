@@ -15,6 +15,7 @@ type instanceResponse struct {
 	ID               string `json:"id"`
 	WorkingDirectory string `json:"working_directory"`
 	Status           string `json:"status"`
+	LastHeartbeatAt  string `json:"last_heartbeat_at,omitempty"`
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
@@ -28,6 +29,9 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 		resp[i] = dbInstanceToResponse(inst)
 		if live, ok := s.manager.Get(inst.ID); ok {
 			resp[i].Status = live.Status
+		}
+		if hb, err := s.queries.GetLastHeartbeatByInstance(r.Context(), inst.ID); err == nil && hb != "" {
+			resp[i].LastHeartbeatAt = hb
 		}
 	}
 	writeJSON(w, resp)
@@ -43,6 +47,9 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	resp := dbInstanceToResponse(inst)
 	if live, ok := s.manager.Get(id); ok {
 		resp.Status = live.Status
+	}
+	if hb, err := s.queries.GetLastHeartbeatByInstance(r.Context(), id); err == nil && hb != "" {
+		resp.LastHeartbeatAt = hb
 	}
 	writeJSON(w, resp)
 }
