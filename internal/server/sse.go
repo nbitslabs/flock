@@ -94,6 +94,14 @@ func (b *SSEBroker) HandleEvent(instanceID, rawJSON string) {
 	b.sendToSession(sessionID, msg)
 }
 
+// SubscribeInternal returns a read-only channel of raw SSE messages for a
+// session and an unsubscribe function. Used by internal Go consumers (e.g.
+// the agent orchestrator waiting for session.idle).
+func (b *SSEBroker) SubscribeInternal(sessionID string) (<-chan string, func()) {
+	ch := b.subscribe(sessionID)
+	return ch, func() { b.unsubscribe(sessionID, ch) }
+}
+
 // ServeHTTP handles an SSE connection for a specific session.
 func (b *SSEBroker) ServeHTTP(w http.ResponseWriter, r *http.Request, sessionID string) {
 	flusher, ok := w.(http.Flusher)

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/nbitslabs/flock/internal/agent"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
 	"github.com/nbitslabs/flock/internal/opencode"
 	webfs "github.com/nbitslabs/flock/web"
@@ -16,15 +17,19 @@ type Server struct {
 	queries *sqlc.Queries
 	manager *opencode.Manager
 	broker  *SSEBroker
+	harness *agent.Harness
+	dataDir string
 	tmpl    *template.Template
 }
 
-func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker) *Server {
+func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir string) *Server {
 	s := &Server{
 		mux:     http.NewServeMux(),
 		queries: queries,
 		manager: manager,
 		broker:  broker,
+		harness: harness,
+		dataDir: dataDir,
 	}
 	s.setupRoutes()
 	return s
@@ -61,6 +66,15 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleGetMessages)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
 	s.mux.HandleFunc("GET /api/sessions/{id}/events", s.handleSessionEvents)
+
+	// Agent API
+	s.mux.HandleFunc("GET /api/instances/{id}/heartbeat", s.handleGetHeartbeat)
+	s.mux.HandleFunc("PUT /api/instances/{id}/heartbeat", s.handlePutHeartbeat)
+	s.mux.HandleFunc("GET /api/instances/{id}/tasks", s.handleListTasks)
+	s.mux.HandleFunc("GET /api/instances/{id}/memory", s.handleGetInstanceMemory)
+	s.mux.HandleFunc("GET /api/global-memory", s.handleGetGlobalMemory)
+	s.mux.HandleFunc("PUT /api/global-memory", s.handlePutGlobalMemory)
+	s.mux.HandleFunc("GET /api/agent/status", s.handleGetAgentStatus)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +88,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// CORS middleware
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)

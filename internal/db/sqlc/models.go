@@ -15,14 +15,14 @@ type Instance struct {
 }
 
 type OrchestratorSession struct {
-	ID             string
-	InstanceID     string
-	SessionID      string
-	HeartbeatCount int64
+	ID              string
+	InstanceID      string
+	SessionID       string
+	HeartbeatCount  int64
+	Status          string
+	CreatedAt       string
+	UpdatedAt       string
 	LastHeartbeatAt string
-	Status         string
-	CreatedAt      string
-	UpdatedAt      string
 }
 
 type Session struct {

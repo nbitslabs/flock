@@ -39,7 +39,7 @@ const createOrchestratorSession = `-- name: CreateOrchestratorSession :one
 
 INSERT INTO orchestrator_sessions (id, instance_id, session_id, status)
 VALUES (?, ?, ?, 'active')
-RETURNING id, instance_id, session_id, heartbeat_count, last_heartbeat_at, status, created_at, updated_at
+RETURNING id, instance_id, session_id, heartbeat_count, status, created_at, updated_at, last_heartbeat_at
 `
 
 type CreateOrchestratorSessionParams struct {
@@ -57,10 +57,10 @@ func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrche
 		&i.InstanceID,
 		&i.SessionID,
 		&i.HeartbeatCount,
-		&i.LastHeartbeatAt,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastHeartbeatAt,
 	)
 	return i, err
 }
@@ -182,7 +182,7 @@ func (q *Queries) DeleteTasksByInstance(ctx context.Context, instanceID string) 
 }
 
 const getActiveOrchestratorSession = `-- name: GetActiveOrchestratorSession :one
-SELECT id, instance_id, session_id, heartbeat_count, last_heartbeat_at, status, created_at, updated_at FROM orchestrator_sessions
+SELECT id, instance_id, session_id, heartbeat_count, status, created_at, updated_at, last_heartbeat_at FROM orchestrator_sessions
 WHERE instance_id = ? AND status = 'active'
 LIMIT 1
 `
@@ -195,10 +195,10 @@ func (q *Queries) GetActiveOrchestratorSession(ctx context.Context, instanceID s
 		&i.InstanceID,
 		&i.SessionID,
 		&i.HeartbeatCount,
-		&i.LastHeartbeatAt,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastHeartbeatAt,
 	)
 	return i, err
 }
@@ -220,6 +220,20 @@ func (q *Queries) GetInstance(ctx context.Context, id string) (Instance, error) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getLastHeartbeatByInstance = `-- name: GetLastHeartbeatByInstance :one
+SELECT last_heartbeat_at FROM orchestrator_sessions
+WHERE instance_id = ? AND status = 'active'
+ORDER BY last_heartbeat_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getLastHeartbeatByInstance, instanceID)
+	var last_heartbeat_at string
+	err := row.Scan(&last_heartbeat_at)
+	return last_heartbeat_at, err
 }
 
 const getSession = `-- name: GetSession :one
@@ -278,20 +292,6 @@ WHERE id = ?
 func (q *Queries) IncrementHeartbeatCount(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, incrementHeartbeatCount, id)
 	return err
-}
-
-const getLastHeartbeatByInstance = `-- name: GetLastHeartbeatByInstance :one
-SELECT last_heartbeat_at FROM orchestrator_sessions
-WHERE instance_id = ? AND status = 'active'
-ORDER BY last_heartbeat_at DESC
-LIMIT 1
-`
-
-func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID string) (string, error) {
-	row := q.db.QueryRowContext(ctx, getLastHeartbeatByInstance, instanceID)
-	var lastHeartbeatAt string
-	err := row.Scan(&lastHeartbeatAt)
-	return lastHeartbeatAt, err
 }
 
 const listActiveTasks = `-- name: ListActiveTasks :many

@@ -1,0 +1,32 @@
+# Flock configuration
+# Priority: CLI flags > environment variables > this file > defaults
+
+# OpenCode server URL
+opencode_url = "http://127.0.0.1:57349"
+
+# Flock listen address
+addr = ":7070"
+
+# SQLite database path
+db = "flock.db"
+
+# Data directory for global memory and other persistent files
+data_dir = "."
+
+# Agent harness configuration
+[agent]
+# Enable the autonomous agent harness
+enabled = true
+
+# Heartbeat interval in seconds (how often the orchestrator checks for issues)
+heartbeat_interval_secs = 300  # 5 minutes
+
+# Seconds of inactivity before a task is considered stuck
+stuck_threshold_secs = 600  # 10 minutes
+
+# Number of heartbeats before rotating the orchestrator session
+# (prevents context window exhaustion)
+max_heartbeats_per_session = 20  # ~100 minutes
+
+# Timeout in seconds for waiting for the orchestrator to finish processing
+wait_for_idle_timeout_secs = 180  # 3 minutes

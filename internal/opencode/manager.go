@@ -22,6 +22,10 @@ type Instance struct {
 // EventHandler is called when an SSE event arrives from the OpenCode server.
 type EventHandler func(instanceID, rawJSON string)
 
+// InstanceHook is called when an instance is registered or stopped.
+// action is "register" or "stop".
+type InstanceHook func(action string, inst *Instance)
+
 // Manager manages OpenCode instances as logical records backed by a shared
 // external OpenCode server. It does not spawn or manage OS processes.
 type Manager struct {
@@ -31,6 +35,14 @@ type Manager struct {
 	eventHandler EventHandler
 	client       *Client
 	cancelEvents context.CancelFunc
+	instanceHook InstanceHook
+}
+
+// SetInstanceHook sets a callback invoked on instance register/stop.
+func (m *Manager) SetInstanceHook(hook InstanceHook) {
+	m.mu.Lock()
+	m.instanceHook = hook
+	m.mu.Unlock()
 }
 
 // NewManager creates a Manager that uses the given shared Client to talk to
@@ -100,6 +112,11 @@ func (m *Manager) Register(ctx context.Context, workingDir string) (*Instance, e
 	m.mu.Unlock()
 
 	log.Printf("registered instance %s for %s", id[:8], workingDir)
+
+	if m.instanceHook != nil {
+		m.instanceHook("register", inst)
+	}
+
 	return inst, nil
 }
 
@@ -144,6 +161,10 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
+	}
+
+	if m.instanceHook != nil {
+		m.instanceHook("stop", &Instance{ID: id})
 	}
 
 	m.queries.DeleteSessionsByInstance(ctx, id)

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nbitslabs/flock/internal/agent"
 	"github.com/nbitslabs/flock/internal/config"
 	"github.com/nbitslabs/flock/internal/db"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
@@ -55,21 +56,41 @@ func main() {
 	// Create SSE broker
 	broker := server.NewSSEBroker()
 
+	// Create agent harness
+	harness := agent.NewHarness(client, queries, cfg.Agent, broker.SubscribeInternal)
+	harness.Start()
+
 	// Create instance manager with shared client
 	manager := opencode.NewManager(queries, func(instanceID, rawJSON string) {
 		broker.HandleEvent(instanceID, rawJSON)
+		harness.HandleEvent(instanceID, rawJSON)
 	}, client)
+
+	// Set instance hook so harness starts/stops per-instance schedulers
+	manager.SetInstanceHook(func(action string, inst *opencode.Instance) {
+		switch action {
+		case "register":
+			harness.StartInstance(inst.ID, inst.WorkingDirectory)
+		case "stop":
+			harness.StopInstance(inst.ID)
+		}
+	})
 
 	// Load existing instances from DB (survives flock restarts)
 	if err := manager.LoadExisting(context.Background()); err != nil {
 		log.Printf("warning: failed to load existing instances: %v", err)
 	}
 
+	// Start agent schedulers for existing instances
+	for _, inst := range manager.List() {
+		harness.StartInstance(inst.ID, inst.WorkingDirectory)
+	}
+
 	// Start global event subscription to the OpenCode server
 	manager.StartEventSubscription()
 
 	// Create HTTP server
-	srv := server.New(queries, manager, broker)
+	srv := server.New(queries, manager, broker, harness, cfg.DataDir)
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: srv,
@@ -92,6 +113,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	harness.Stop()
 	manager.StopEventSubscription()
 	httpServer.Shutdown(shutdownCtx)
 
