@@ -11,6 +11,8 @@ import (
 )
 
 // CreateSubAgentSession creates a new OpenCode session and sends an issue-resolution prompt.
+// The session and DB records are created synchronously, but the actual message send
+// runs in a goroutine so it does not block the heartbeat loop.
 func CreateSubAgentSession(
 	ctx context.Context,
 	client *opencode.Client,
@@ -50,13 +52,22 @@ func CreateSubAgentSession(
 		ID:     task.ID,
 	})
 
+	log.Printf("agent: created sub-agent session %s for issue #%d", session.ID[:8], task.IssueNumber)
+
 	prompt := composeSubAgentPrompt(workingDir, task)
 
-	if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
-		return fmt.Errorf("send sub-agent prompt: %w", err)
-	}
+	// Send message in a goroutine so it doesn't block the heartbeat loop.
+	// OpenCode's message endpoint blocks until the AI finishes processing.
+	go func() {
+		if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
+			log.Printf("agent: sub-agent message failed for issue #%d: %v", task.IssueNumber, err)
+			queries.UpdateTaskStatus(context.Background(), sqlc.UpdateTaskStatusParams{
+				Status: "failed",
+				ID:     task.ID,
+			})
+		}
+	}()
 
-	log.Printf("agent: created sub-agent session %s for issue #%d", session.ID[:8], task.IssueNumber)
 	return nil
 }
 
@@ -166,11 +177,19 @@ func RestartSubAgent(
 		prompt += fmt.Sprintf("\n## Context from Memory\n%s\n", progressContent)
 	}
 
-	if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
-		return fmt.Errorf("send restart prompt: %w", err)
-	}
-
 	log.Printf("agent: restarted sub-agent session %s for issue #%d (reason: %s)",
 		session.ID[:8], task.IssueNumber, reason)
+
+	// Send message in a goroutine so it doesn't block the heartbeat loop.
+	go func() {
+		if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
+			log.Printf("agent: restart message failed for issue #%d: %v", task.IssueNumber, err)
+			queries.UpdateTaskStatus(context.Background(), sqlc.UpdateTaskStatusParams{
+				Status: "failed",
+				ID:     task.ID,
+			})
+		}
+	}()
+
 	return nil
 }
