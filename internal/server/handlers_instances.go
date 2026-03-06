@@ -13,8 +13,6 @@ type createInstanceRequest struct {
 
 type instanceResponse struct {
 	ID               string `json:"id"`
-	Pid              int    `json:"pid"`
-	Port             int    `json:"port"`
 	WorkingDirectory string `json:"working_directory"`
 	Status           string `json:"status"`
 }
@@ -25,14 +23,11 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Merge live state from manager
 	resp := make([]instanceResponse, len(instances))
 	for i, inst := range instances {
 		resp[i] = dbInstanceToResponse(inst)
 		if live, ok := s.manager.Get(inst.ID); ok {
 			resp[i].Status = live.Status
-			resp[i].Port = live.Port
-			resp[i].Pid = live.Pid
 		}
 	}
 	writeJSON(w, resp)
@@ -48,8 +43,6 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	resp := dbInstanceToResponse(inst)
 	if live, ok := s.manager.Get(id); ok {
 		resp.Status = live.Status
-		resp.Port = live.Port
-		resp.Pid = live.Pid
 	}
 	writeJSON(w, resp)
 }
@@ -65,7 +58,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := s.manager.Spawn(r.Context(), req.WorkingDirectory)
+	inst, err := s.manager.Register(r.Context(), req.WorkingDirectory)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -74,8 +67,6 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, instanceResponse{
 		ID:               inst.ID,
-		Pid:              inst.Pid,
-		Port:             inst.Port,
 		WorkingDirectory: inst.WorkingDirectory,
 		Status:           inst.Status,
 	})
@@ -83,9 +74,8 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// Try to stop the live process first
 	if err := s.manager.Stop(r.Context(), id); err != nil {
-		// Instance not in memory (e.g. stopped from previous run) - clean up DB directly
+		// Instance not in memory — clean up DB directly
 		s.queries.DeleteSessionsByInstance(r.Context(), id)
 		if err := s.queries.DeleteInstance(r.Context(), id); err != nil {
 			http.Error(w, "instance not found", http.StatusNotFound)
@@ -98,32 +88,10 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 func dbInstanceToResponse(inst sqlc.Instance) instanceResponse {
 	return instanceResponse{
 		ID:               inst.ID,
-		Pid:              int(inst.Pid),
-		Port:             int(inst.Port),
 		WorkingDirectory: inst.WorkingDirectory,
 		Status:           inst.Status,
 	}
 }
-
-func (s *Server) handleRestoreInstance(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	inst, err := s.manager.RestoreInstance(r.Context(), id)
-	if err != nil {
-		http.Error(w, "failed to restore: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	writeJSON(w, instanceResponse{
-		ID:               inst.ID,
-		Pid:              inst.Pid,
-		Port:             inst.Port,
-		WorkingDirectory: inst.WorkingDirectory,
-		Status:           inst.Status,
-	})
-}
-
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")

@@ -11,26 +11,17 @@ import (
 
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (id, pid, port, working_directory, status)
-VALUES (?, ?, ?, ?, ?)
+VALUES (?, 0, 0, ?, 'running')
 RETURNING id, pid, port, working_directory, status, created_at, updated_at
 `
 
 type CreateInstanceParams struct {
 	ID               string
-	Pid              int64
-	Port             int64
 	WorkingDirectory string
-	Status           string
 }
 
 func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) (Instance, error) {
-	row := q.db.QueryRowContext(ctx, createInstance,
-		arg.ID,
-		arg.Pid,
-		arg.Port,
-		arg.WorkingDirectory,
-		arg.Status,
-	)
+	row := q.db.QueryRowContext(ctx, createInstance, arg.ID, arg.WorkingDirectory)
 	var i Instance
 	err := row.Scan(
 		&i.ID,
@@ -198,68 +189,6 @@ func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string)
 		return nil, err
 	}
 	return items, nil
-}
-
-const listSessionsForRestore = `-- name: ListSessionsForRestore :many
-SELECT id, instance_id, title, status FROM sessions WHERE instance_id = ? AND status != 'stopped' ORDER BY created_at DESC
-`
-
-type ListSessionsForRestoreRow struct {
-	ID         string
-	InstanceID string
-	Title      string
-	Status     string
-}
-
-func (q *Queries) ListSessionsForRestore(ctx context.Context, instanceID string) ([]ListSessionsForRestoreRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSessionsForRestore, instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListSessionsForRestoreRow
-	for rows.Next() {
-		var i ListSessionsForRestoreRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.InstanceID,
-			&i.Title,
-			&i.Status,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const markStaleInstancesStopped = `-- name: MarkStaleInstancesStopped :exec
-UPDATE instances SET status = 'stopped', updated_at = datetime('now') WHERE status IN ('starting', 'running')
-`
-
-func (q *Queries) MarkStaleInstancesStopped(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, markStaleInstancesStopped)
-	return err
-}
-
-const updateInstancePort = `-- name: UpdateInstancePort :exec
-UPDATE instances SET port = ?, updated_at = datetime('now') WHERE id = ?
-`
-
-type UpdateInstancePortParams struct {
-	Port int64
-	ID   string
-}
-
-func (q *Queries) UpdateInstancePort(ctx context.Context, arg UpdateInstancePortParams) error {
-	_, err := q.db.ExecContext(ctx, updateInstancePort, arg.Port, arg.ID)
-	return err
 }
 
 const updateInstanceStatus = `-- name: UpdateInstanceStatus :exec

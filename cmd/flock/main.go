@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nbitslabs/flock/internal/config"
 	"github.com/nbitslabs/flock/internal/db"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
 	"github.com/nbitslabs/flock/internal/opencode"
@@ -17,15 +18,30 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
-	dbPath := flag.String("db", "flock.db", "database path")
+	configPath := flag.String("config", "flock.toml", "config file path")
+	flagOpenCodeURL := flag.String("opencode-url", "", "OpenCode server URL")
+	flagAddr := flag.String("addr", "", "listen address")
+	flagDB := flag.String("db", "", "database path")
 	flag.Parse()
 
+	cfg := config.Load(*configPath)
+
+	// CLI flags override config/env (highest priority)
+	if *flagOpenCodeURL != "" {
+		cfg.OpenCodeURL = *flagOpenCodeURL
+	}
+	if *flagAddr != "" {
+		cfg.Addr = *flagAddr
+	}
+	if *flagDB != "" {
+		cfg.DBPath = *flagDB
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("starting flock...")
+	log.Printf("starting flock (opencode: %s)...", cfg.OpenCodeURL)
 
 	// Open database
-	database, err := db.Open(*dbPath)
+	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatal("failed to open database:", err)
 	}
@@ -33,24 +49,29 @@ func main() {
 
 	queries := sqlc.New(database)
 
+	// Create shared OpenCode client
+	client := opencode.NewClient(cfg.OpenCodeURL)
+
 	// Create SSE broker
 	broker := server.NewSSEBroker()
 
-	// Create instance manager
+	// Create instance manager with shared client
 	manager := opencode.NewManager(queries, func(instanceID, rawJSON string) {
 		broker.HandleEvent(instanceID, rawJSON)
-	})
+	}, client)
 
-	// Mark stale instances as stopped (handles crash recovery where
-	// instances are still marked as running but the processes are dead)
-	if err := queries.MarkStaleInstancesStopped(context.Background()); err != nil {
-		log.Printf("warning: failed to mark stale instances: %v", err)
+	// Load existing instances from DB (survives flock restarts)
+	if err := manager.LoadExisting(context.Background()); err != nil {
+		log.Printf("warning: failed to load existing instances: %v", err)
 	}
+
+	// Start global event subscription to the OpenCode server
+	manager.StartEventSubscription()
 
 	// Create HTTP server
 	srv := server.New(queries, manager, broker)
 	httpServer := &http.Server{
-		Addr:    *addr,
+		Addr:    cfg.Addr,
 		Handler: srv,
 	}
 
@@ -59,7 +80,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("flock listening on %s", *addr)
+		log.Printf("flock listening on %s", cfg.Addr)
 		if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal("server error:", err)
 		}
@@ -68,11 +89,10 @@ func main() {
 	<-ctx.Done()
 	log.Println("shutting down...")
 
-	// Stop all OpenCode instances
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	manager.StopAll(shutdownCtx)
+	manager.StopEventSubscription()
 	httpServer.Shutdown(shutdownCtx)
 
 	log.Println("flock stopped")

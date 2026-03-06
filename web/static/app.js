@@ -113,14 +113,6 @@
         await refreshInstances();
     }
 
-    async function restoreInstance(id) {
-        try {
-            await api('POST', `/api/instances/${id}/restore`);
-            store._instanceHash = '';
-            await refreshInstances();
-        } catch (e) { alert('Failed to restore instance: ' + e.message); }
-    }
-
     async function loadSessions(instanceId) {
         try {
             const list = await api('GET', `/api/instances/${instanceId}/sessions`) || [];
@@ -131,11 +123,6 @@
     }
 
     async function createSession(instanceId) {
-        const inst = store.instances.get(instanceId);
-        if (inst && inst.status !== 'running') {
-            alert(`Instance is ${inst.status}. Wait for it to finish starting.`);
-            return;
-        }
         try {
             const session = await api('POST', `/api/instances/${instanceId}/sessions`);
             await loadSessions(instanceId);
@@ -746,20 +733,12 @@
 
     function createInstanceEl(inst) {
         const sel = inst.id === store.selectedInstanceId;
-        const stopped = inst.status === 'stopped';
         const div = h('div', {
             className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-700' : 'hover:bg-gray-800'}`,
             'data-action': 'select-instance', 'data-id': inst.id,
         });
         div.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0` }));
-        div.appendChild(h('span', { className: `text-sm truncate flex-1 ${stopped ? 'text-gray-500' : ''}`, textContent: inst.working_directory.split('/').pop() || inst.working_directory, title: inst.working_directory }));
-        if (inst.port) div.appendChild(h('span', { className: 'text-xs text-gray-500 flex-shrink-0', textContent: ':' + inst.port }));
-        if (stopped) {
-            div.appendChild(h('button', {
-                className: 'text-xs px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
-                'data-action': 'restore-instance', 'data-id': inst.id, textContent: 'Restore',
-            }));
-        }
+        div.appendChild(h('span', { className: 'text-sm truncate flex-1', textContent: inst.working_directory.split('/').pop() || inst.working_directory, title: inst.working_directory }));
         div.appendChild(h('button', {
             className: 'text-gray-500 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
             'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
@@ -903,8 +882,7 @@
         if (!t) return;
         switch (t.dataset.action) {
             case 'select-instance': selectInstance(t.dataset.id); break;
-            case 'delete-instance': e.stopPropagation(); if (confirm('Stop this instance?')) deleteInstance(t.dataset.id); break;
-            case 'restore-instance': e.stopPropagation(); restoreInstance(t.dataset.id); break;
+            case 'delete-instance': e.stopPropagation(); if (confirm('Remove this instance?')) deleteInstance(t.dataset.id); break;
             case 'select-session': selectSession(t.dataset.id); break;
         }
     });
