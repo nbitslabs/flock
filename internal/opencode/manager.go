@@ -66,7 +66,13 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 	id := uuid.New().String()
 
 	// Create DB record
-	_, err := m.queries.CreateInstance(ctx, id, 0, 0, workingDir, "starting")
+	_, err := m.queries.CreateInstance(ctx, sqlc.CreateInstanceParams{
+		ID:               id,
+		Pid:              0,
+		Port:             0,
+		WorkingDirectory: workingDir,
+		Status:           "starting",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create instance record: %w", err)
 	}
@@ -90,7 +96,7 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		m.queries.UpdateInstanceStatus(ctx, "error", id)
+		m.queries.UpdateInstanceStatus(ctx, sqlc.UpdateInstanceStatusParams{Status: "error", ID: id})
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 
@@ -104,7 +110,7 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 	}
 
 	// Update the DB record with the actual PID
-	m.queries.UpdateInstanceStatus(ctx, "starting", id)
+	m.queries.UpdateInstanceStatus(ctx, sqlc.UpdateInstanceStatusParams{Status: "starting", ID: id})
 
 	m.mu.Lock()
 	m.instances[id] = inst
@@ -120,7 +126,7 @@ func (m *Manager) Spawn(ctx context.Context, workingDir string) (*Instance, erro
 		m.mu.Lock()
 		inst.Status = "stopped"
 		m.mu.Unlock()
-		m.queries.UpdateInstanceStatus(context.Background(), "stopped", id)
+		m.queries.UpdateInstanceStatus(context.Background(), sqlc.UpdateInstanceStatusParams{Status: "stopped", ID: id})
 		if err != nil {
 			log.Printf("opencode instance %s exited: %v", id, err)
 		}
@@ -148,8 +154,8 @@ func (m *Manager) discoverPort(inst *Instance, r interface{ Read([]byte) (int, e
 			}
 			m.mu.Unlock()
 
-			m.queries.UpdateInstancePort(context.Background(), int64(port), inst.ID)
-			m.queries.UpdateInstanceStatus(context.Background(), "running", inst.ID)
+			m.queries.UpdateInstancePort(context.Background(), sqlc.UpdateInstancePortParams{Port: int64(port), ID: inst.ID})
+			m.queries.UpdateInstanceStatus(context.Background(), sqlc.UpdateInstanceStatusParams{Status: "running", ID: inst.ID})
 
 			log.Printf("opencode instance %s running on port %d", inst.ID[:8], port)
 
@@ -187,18 +193,19 @@ func (m *Manager) subscribeEvents(inst *Instance) {
 	}
 }
 
-// Stop gracefully stops an OpenCode instance.
-func (m *Manager) Stop(ctx context.Context, id string) error {
+// killProcess kills the process for an instance and removes it from the in-memory map.
+func (m *Manager) killProcess(id string) {
 	m.mu.Lock()
 	inst, ok := m.instances[id]
-	if !ok {
-		m.mu.Unlock()
-		return fmt.Errorf("instance %s not found", id)
+	if ok {
+		delete(m.instances, id)
 	}
-	delete(m.instances, id)
 	m.mu.Unlock()
 
-	// Try graceful shutdown
+	if !ok {
+		return
+	}
+
 	if inst.cmd != nil && inst.cmd.Process != nil {
 		_ = syscall.Kill(-inst.cmd.Process.Pid, syscall.SIGTERM)
 		done := make(chan struct{})
@@ -215,8 +222,19 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	if inst.cancel != nil {
 		inst.cancel()
 	}
+}
 
-	m.queries.UpdateInstanceStatus(ctx, "stopped", id)
+// Stop gracefully stops an OpenCode instance and removes it from the database.
+func (m *Manager) Stop(ctx context.Context, id string) error {
+	m.mu.RLock()
+	_, ok := m.instances[id]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("instance %s not found", id)
+	}
+
+	m.killProcess(id)
+	m.queries.UpdateInstanceStatus(ctx, sqlc.UpdateInstanceStatusParams{Status: "stopped", ID: id})
 	m.queries.DeleteSessionsByInstance(ctx, id)
 	m.queries.DeleteInstance(ctx, id)
 	return nil
@@ -241,7 +259,8 @@ func (m *Manager) List() []*Instance {
 	return result
 }
 
-// StopAll stops all running instances.
+// StopAll stops all running instances for graceful shutdown.
+// Preserves DB records so instances can be restored after restart.
 func (m *Manager) StopAll(ctx context.Context) {
 	m.mu.RLock()
 	ids := make([]string, 0, len(m.instances))
@@ -251,8 +270,31 @@ func (m *Manager) StopAll(ctx context.Context) {
 	m.mu.RUnlock()
 
 	for _, id := range ids {
-		if err := m.Stop(ctx, id); err != nil {
-			log.Printf("error stopping instance %s: %v", id[:8], err)
-		}
+		m.killProcess(id)
+		m.queries.UpdateInstanceStatus(ctx, sqlc.UpdateInstanceStatusParams{Status: "stopped", ID: id})
 	}
+}
+
+// RestoreInstance restores a stopped instance by spawning a new OpenCode process
+// for the same working directory. The old DB record is cleaned up.
+func (m *Manager) RestoreInstance(ctx context.Context, instID string) (*Instance, error) {
+	dbInst, err := m.queries.GetInstance(ctx, instID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+
+	workDir := dbInst.WorkingDirectory
+
+	// Clean up old record and its sessions
+	m.queries.DeleteSessionsByInstance(ctx, instID)
+	m.queries.DeleteInstance(ctx, instID)
+
+	// Spawn a new process (creates new DB record with new ID)
+	newInst, err := m.Spawn(ctx, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("spawn instance: %w", err)
+	}
+
+	log.Printf("restored instance for %s (old: %s, new: %s)", workDir, instID[:8], newInst.ID[:8])
+	return newInst, nil
 }

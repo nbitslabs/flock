@@ -24,6 +24,9 @@ UPDATE instances SET status = 'stopped', updated_at = datetime('now') WHERE stat
 -- name: ListSessionsByInstance :many
 SELECT * FROM sessions WHERE instance_id = ? ORDER BY created_at DESC;
 
+-- name: ListSessionsForRestore :many
+SELECT id, instance_id, title, status FROM sessions WHERE instance_id = ? AND status != 'stopped' ORDER BY created_at DESC;
+
 -- name: GetSession :one
 SELECT * FROM sessions WHERE id = ?;
 
@@ -31,6 +34,13 @@ SELECT * FROM sessions WHERE id = ?;
 INSERT INTO sessions (id, instance_id, title, status)
 VALUES (?, ?, ?, ?)
 RETURNING *;
+
+-- name: UpsertSession :exec
+INSERT INTO sessions (id, instance_id, title, status)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  title = excluded.title,
+  updated_at = datetime('now');
 
 -- name: UpdateSessionStatus :exec
 UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?;

@@ -53,6 +53,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/instances", s.handleCreateInstance)
 	s.mux.HandleFunc("GET /api/instances/{id}", s.handleGetInstance)
 	s.mux.HandleFunc("DELETE /api/instances/{id}", s.handleDeleteInstance)
+	s.mux.HandleFunc("POST /api/instances/{id}/restore", s.handleRestoreInstance)
 
 	// Session API
 	s.mux.HandleFunc("GET /api/instances/{id}/sessions", s.handleListSessions)

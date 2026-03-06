@@ -6,11 +6,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/nbitslabs/flock/internal/db/sqlc"
 )
-
-type createSessionRequest struct {
-	Title string `json:"title"`
-}
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
@@ -25,6 +22,15 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	if ok && inst.Client != nil {
 		sessions, err := inst.Client.ListSessions(r.Context())
 		if err == nil {
+			// Sync sessions into flock's DB so other handlers can look them up
+			for _, sess := range sessions {
+				s.queries.UpsertSession(r.Context(), sqlc.UpsertSessionParams{
+					ID:         sess.ID,
+					InstanceID: instanceID,
+					Title:      sess.Title,
+					Status:     "active",
+				})
+			}
 			writeJSON(w, sessions)
 			return
 		}
@@ -59,7 +65,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = uuid.New().String()
 	}
-	s.queries.CreateSession(r.Context(), sessionID, instanceID, ocSession.Title, "active")
+	s.queries.CreateSession(r.Context(), sqlc.CreateSessionParams{
+		ID:         sessionID,
+		InstanceID: instanceID,
+		Title:      ocSession.Title,
+		Status:     "active",
+	})
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, ocSession)

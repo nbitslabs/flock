@@ -33,11 +33,6 @@ func main() {
 
 	queries := sqlc.New(database)
 
-	// Mark stale instances from previous run as stopped
-	if err := queries.MarkStaleInstancesStopped(context.Background()); err != nil {
-		log.Printf("warning: failed to mark stale instances: %v", err)
-	}
-
 	// Create SSE broker
 	broker := server.NewSSEBroker()
 
@@ -45,6 +40,12 @@ func main() {
 	manager := opencode.NewManager(queries, func(instanceID, rawJSON string) {
 		broker.HandleEvent(instanceID, rawJSON)
 	})
+
+	// Mark stale instances as stopped (handles crash recovery where
+	// instances are still marked as running but the processes are dead)
+	if err := queries.MarkStaleInstancesStopped(context.Background()); err != nil {
+		log.Printf("warning: failed to mark stale instances: %v", err)
+	}
 
 	// Create HTTP server
 	srv := server.New(queries, manager, broker)
