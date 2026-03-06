@@ -87,8 +87,7 @@ func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instance
 	}
 
 	for _, d := range decisions {
-		task, err := dp.queries.GetTaskByID(ctx, d.TaskID)
-		if err != nil {
+		if _, err := dp.queries.GetTaskByID(ctx, d.TaskID); err != nil {
 			log.Printf("agent: failed to get task %s: %v", d.TaskID, err)
 			continue
 		}
@@ -99,10 +98,6 @@ func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instance
 		}); err != nil {
 			log.Printf("agent: failed to mark task %s as completed: %v", d.TaskID, err)
 			continue
-		}
-
-		if err := removeWorktree(workingDir, task.BranchName); err != nil {
-			log.Printf("agent: failed to remove worktree for branch %s: %v", task.BranchName, err)
 		}
 
 		log.Printf("agent: marked task %s as completed (%s)", truncID(d.TaskID), d.Reason)
