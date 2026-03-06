@@ -111,7 +111,7 @@ This project uses Nix for development tooling. To run commands with the devenv (
 - If tests fail, fix them before proceeding
 - Write progress to `+"`%s/.flock/memory/progress/issue_%d.md`"+`
 - If you get stuck, describe the blocker in the progress file
-- When done, do NOT remove the worktree — flock manages cleanup
+- When done, remove the worktree by running: `+"`cd %s && git worktree remove .`"+`
 `,
 		workingDir,
 		task.BranchName, worktreeDir,
@@ -126,6 +126,7 @@ This project uses Nix for development tooling. To run commands with the devenv (
 		task.IssueNumber, task.Title, task.IssueNumber,
 		worktreeDir,
 		workingDir, task.IssueNumber,
+		worktreeDir,
 	)
 }
 
