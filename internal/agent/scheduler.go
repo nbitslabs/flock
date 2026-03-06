@@ -90,11 +90,13 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 
 	// 1. Send heartbeat to orchestrator and wait for response
 	if err := s.orchestrator.SendHeartbeat(ctx); err != nil {
-		log.Printf("agent: heartbeat failed for %s: %v", truncID(s.instanceID), err)
-		return
+		log.Printf("agent: heartbeat send/wait failed for %s: %v", truncID(s.instanceID), err)
+		// Don't return — the orchestrator may have already written decision
+		// files before the error (e.g. waitForIdle timeout). Always attempt
+		// to process them so work isn't silently dropped.
 	}
 
-	// 2. Process decision files
+	// 2. Process decision files (even if SendHeartbeat errored)
 	s.processor.ProcessDecisions(ctx, s.instanceID, s.workingDir)
 
 	// 3. Check for stuck tasks and mark them
