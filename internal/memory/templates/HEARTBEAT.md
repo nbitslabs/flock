@@ -20,7 +20,14 @@ Compare the issue list with tracked tasks to identify:
 - **Completed tasks**: tracked tasks whose issues are closed or PRs are merged
 - **Stuck tasks**: tasks marked as stuck that may need restarting
 
-### 4. Write Decision Files
+### 4. Acknowledge New Issues
+For each **new issue** (assigned but not yet tracked), immediately acknowledge it using `gh`:
+1. React with 👀: `gh issue react <number> --emoji eyes`
+2. Comment that work is starting: `gh issue comment <number> --body "I'm looking at this issue now. I'll be working on it in the \`fix/issue-<number>-<slug>\` branch."`
+
+Do this **before** writing the decision files so the issue author gets prompt feedback.
+
+### 5. Write Decision Files
 
 #### For completed tasks, write `.flock/memory/completed_tasks.json`:
 ```json
@@ -55,7 +62,7 @@ The `reason` should be `"issue closed"` or `"pr merged"` depending on which cond
 ]
 ```
 
-### 5. Update Memory
+### 6. Update Memory
 Write any relevant observations to `.flock/memory/MEMORY.md` to maintain context across sessions.
 
 ## Important Rules
