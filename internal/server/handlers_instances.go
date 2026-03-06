@@ -3,9 +3,23 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/nbitslabs/flock/internal/db/sqlc"
 )
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
 
 type createInstanceRequest struct {
 	WorkingDirectory string `json:"working_directory"`
@@ -65,7 +79,9 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, err := s.manager.Register(r.Context(), req.WorkingDirectory)
+	workingDir := expandHome(req.WorkingDirectory)
+
+	inst, err := s.manager.Register(r.Context(), workingDir)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
