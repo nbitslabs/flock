@@ -143,36 +143,33 @@
         } catch (e) { alert('Failed to create session: ' + e.message); }
     }
 
-    async function loadMessages(sessionId) {
+    // Load messages from API.
+    // merge=false (default): clear store first — used on initial session select.
+    // merge=true: keep existing messages and layer API data on top — used on session.idle
+    //   so that messages added by SSE message.updated events are never lost.
+    async function loadMessages(sessionId, merge) {
         try {
             const msgs = await api('GET', `/api/sessions/${sessionId}/messages`) || [];
             if (store.selectedSessionId !== sessionId) return;
 
-            // Always save optimistic messages first
-            const optimistic = [];
-            for (const [id, m] of store.messages) {
-                if (m._optimistic) optimistic.push([id, m]);
+            if (!merge) {
+                store.messages.clear();
             }
 
-            store.messages.clear();
-
-            // Re-add optimistic messages
-            for (const [id, m] of optimistic) store.messages.set(id, m);
-
-            // Add API messages
+            // Add/update messages from API (overwrites stale versions)
             for (const m of msgs) {
                 if (!m.info?.id) continue;
                 store.messages.set(m.info.id, m);
             }
 
-            // Deduplicate: if API returned a user message with same text as optimistic,
-            // remove the optimistic (API version has real ID/timestamp)
-            for (const [optId, optMsg] of optimistic) {
-                const optText = extractText(optMsg.parts).trim();
-                if (!optText) continue;
-                for (const m of msgs) {
-                    if (m.info?.role === 'user' && extractText(m.parts).trim() === optText) {
-                        store.messages.delete(optId);
+            // Remove optimistic messages that the API has confirmed
+            for (const [id, m] of store.messages) {
+                if (!m._optimistic) continue;
+                const optText = extractText(m.parts).trim();
+                if (!optText) { store.messages.delete(id); continue; }
+                for (const apiMsg of msgs) {
+                    if (apiMsg.info?.role === 'user' && extractText(apiMsg.parts).trim() === optText) {
+                        store.messages.delete(id);
                         break;
                     }
                 }
@@ -259,6 +256,27 @@
         const msg = props.message || props;
         if (msg && msg.info && msg.info.id) {
             store.messages.set(msg.info.id, msg);
+
+            // Remove streaming parts that belong to this settled message
+            for (const [partId, part] of store.streamingParts) {
+                if (part._messageID === msg.info.id) {
+                    store.streamingParts.delete(partId);
+                }
+            }
+
+            // Remove optimistic user messages matched by this update
+            if (msg.info.role === 'user') {
+                const msgText = extractText(msg.parts).trim();
+                if (msgText) {
+                    for (const [id, m] of store.messages) {
+                        if (m._optimistic && extractText(m.parts).trim() === msgText) {
+                            store.messages.delete(id);
+                            break;
+                        }
+                    }
+                }
+            }
+
             renderMessages();
         }
     }
@@ -286,7 +304,8 @@
         store.sessionBusy = false;
         store.sessionBusyTool = null;
         updateInputState(); updateHeaderStatus();
-        if (store.selectedSessionId) loadMessages(store.selectedSessionId);
+        // Merge mode: keep messages from SSE events, layer API data on top
+        if (store.selectedSessionId) loadMessages(store.selectedSessionId, true);
     }
 
     // =========================================================================
@@ -348,7 +367,12 @@
         if (!settled) return;
 
         const msgs = Array.from(store.messages.values());
-        msgs.sort((a, b) => (a.info.time?.created || 0) - (b.info.time?.created || 0));
+        // Sort chronologically; fall back to insertion order for missing timestamps
+        msgs.sort((a, b) => {
+            const ta = Number(a.info?.time?.created) || 0;
+            const tb = Number(b.info?.time?.created) || 0;
+            return ta - tb;
+        });
 
         const frag = document.createDocumentFragment();
         let i = 0;
