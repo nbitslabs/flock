@@ -144,9 +144,8 @@
     }
 
     // Load messages from API.
-    // merge=false (default): clear store first — used on initial session select.
-    // merge=true: keep existing messages and layer API data on top — used on session.idle
-    //   so that messages added by SSE message.updated events are never lost.
+    // merge=false (default): clear store first — used on session select and session idle.
+    // merge=true: keep existing messages and layer API data on top (currently unused).
     async function loadMessages(sessionId, merge) {
         try {
             const msgs = await api('GET', `/api/sessions/${sessionId}/messages`) || [];
@@ -162,14 +161,19 @@
                 store.messages.set(m.info.id, m);
             }
 
-            // Remove optimistic messages that the API has confirmed
+            // Clean up optimistic messages only when the API has a renderable replacement
             for (const [id, m] of store.messages) {
                 if (!m._optimistic) continue;
                 const optText = extractText(m.parts).trim();
                 if (!optText) { store.messages.delete(id); continue; }
                 for (const apiMsg of msgs) {
-                    if (apiMsg.info?.role === 'user' && extractText(apiMsg.parts).trim() === optText) {
-                        store.messages.delete(id);
+                    if (apiMsg.info?.role === 'user' && apiMsg.info?.id &&
+                        extractText(apiMsg.parts).trim() === optText) {
+                        // Only remove if the API version is in the store and renderable
+                        const real = store.messages.get(apiMsg.info.id);
+                        if (real && extractText(real.parts).trim()) {
+                            store.messages.delete(id);
+                        }
                         break;
                     }
                 }
@@ -247,33 +251,44 @@
         if (!part) return;
         const id = part.id || part.partID;
         if (!id) return;
+        const messageID = part.messageID;
         const existing = store.streamingParts.get(id);
-        store.streamingParts.set(id, { ...part, _messageID: part.messageID || (existing && existing._messageID) });
+        store.streamingParts.set(id, { ...part, _messageID: messageID || (existing && existing._messageID) });
+
+        // Also attach the part to the settled message so it survives
+        // when streaming parts are cleared (especially important for user messages
+        // whose message.updated events carry only info, no parts).
+        if (messageID) {
+            const msg = store.messages.get(messageID);
+            if (msg) {
+                if (!msg.parts) msg.parts = [];
+                const idx = msg.parts.findIndex(p => (p.id || p.partID) === id);
+                if (idx >= 0) msg.parts[idx] = part;
+                else msg.parts.push(part);
+            }
+        }
+
         renderStreamingArea();
     }
 
     function handleMessageUpdated(props) {
         const msg = props.message || props;
         if (msg && msg.info && msg.info.id) {
-            store.messages.set(msg.info.id, msg);
+            // message.updated events often carry only `info` (no parts).
+            // Merge into the existing entry so we never clobber parts with nothing.
+            const existing = store.messages.get(msg.info.id);
+            if (existing) {
+                existing.info = msg.info;
+                // Only overwrite parts if the event actually carries them
+                if (msg.parts) existing.parts = msg.parts;
+            } else {
+                store.messages.set(msg.info.id, msg);
+            }
 
             // Remove streaming parts that belong to this settled message
             for (const [partId, part] of store.streamingParts) {
                 if (part._messageID === msg.info.id) {
                     store.streamingParts.delete(partId);
-                }
-            }
-
-            // Remove optimistic user messages matched by this update
-            if (msg.info.role === 'user') {
-                const msgText = extractText(msg.parts).trim();
-                if (msgText) {
-                    for (const [id, m] of store.messages) {
-                        if (m._optimistic && extractText(m.parts).trim() === msgText) {
-                            store.messages.delete(id);
-                            break;
-                        }
-                    }
                 }
             }
 
@@ -304,8 +319,9 @@
         store.sessionBusy = false;
         store.sessionBusyTool = null;
         updateInputState(); updateHeaderStatus();
-        // Merge mode: keep messages from SSE events, layer API data on top
-        if (store.selectedSessionId) loadMessages(store.selectedSessionId, true);
+        // Full reload from API — session.idle means processing is complete,
+        // so the API has all committed messages.
+        if (store.selectedSessionId) loadMessages(store.selectedSessionId, false);
     }
 
     // =========================================================================
@@ -323,7 +339,7 @@
 
         const optId = '_opt_' + Date.now();
         store.messages.set(optId, {
-            info: { id: optId, role: 'user', time: { created: Date.now() / 1000 } },
+            info: { id: optId, role: 'user', time: { created: Date.now() } },
             parts: [{ type: 'text', text: content }],
             _optimistic: true,
         });
@@ -357,20 +373,61 @@
     function extractText(parts) {
         const texts = [];
         for (const p of normalizeParts(parts)) {
-            if (p.type === 'text' && (p.text || p.content)) texts.push(p.text || p.content);
+            // Accept type 'text' or missing type if text/content exists
+            if (p.type && p.type !== 'text') continue;
+            if (p.text || p.content) texts.push(p.text || p.content);
         }
         return texts.join('\n');
+    }
+
+    /** Normalize timestamp to milliseconds (handles both seconds and milliseconds) */
+    function normalizeTs(t) {
+        const n = Number(t);
+        if (!n) return 0;
+        // If < 1e12 it's seconds; otherwise milliseconds
+        return n < 1e12 ? n * 1000 : n;
+    }
+
+    function formatTime(ts) {
+        if (!ts) return '';
+        const ms = normalizeTs(ts);
+        if (!ms) return '';
+        const d = new Date(ms);
+        const now = new Date();
+        const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // Show date if not today
+        if (d.toDateString() !== now.toDateString()) {
+            return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+        }
+        return time;
     }
 
     function renderMessages() {
         const settled = document.getElementById('settled-messages');
         if (!settled) return;
 
-        const msgs = Array.from(store.messages.values());
-        // Sort chronologically; fall back to insertion order for missing timestamps
+        const allMsgs = Array.from(store.messages.values());
+
+        // Build set of confirmed (non-optimistic) user message texts
+        const confirmedUserTexts = new Set();
+        for (const m of allMsgs) {
+            if (m._optimistic) continue;
+            if (m.info?.role === 'user') {
+                const t = extractText(m.parts).trim();
+                if (t) confirmedUserTexts.add(t);
+            }
+        }
+
+        // Hide optimistic messages only when a confirmed renderable version exists
+        const msgs = allMsgs.filter(m => {
+            if (!m._optimistic) return true;
+            return !confirmedUserTexts.has(extractText(m.parts).trim());
+        });
+
+        // Sort chronologically (normalize seconds vs milliseconds)
         msgs.sort((a, b) => {
-            const ta = Number(a.info?.time?.created) || 0;
-            const tb = Number(b.info?.time?.created) || 0;
+            const ta = normalizeTs(a.info?.time?.created);
+            const tb = normalizeTs(b.info?.time?.created);
             return ta - tb;
         });
 
@@ -411,10 +468,12 @@
     function buildUserBubble(msg) {
         const text = extractText(msg.parts);
         if (!text) return null;
-        const wrapper = h('div', { className: 'flex justify-end' });
+        const wrapper = h('div', { className: 'flex flex-col items-end gap-1' });
         wrapper.appendChild(h('div', {
             className: `max-w-3xl rounded-lg px-4 py-3 bg-blue-600 ${msg._optimistic ? 'opacity-60' : ''}`,
         }, h('pre', { className: 'whitespace-pre-wrap text-sm leading-relaxed', textContent: text })));
+        const ts = formatTime(msg.info?.time?.created);
+        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-600 px-1', textContent: ts }));
         return wrapper;
     }
 
@@ -436,12 +495,17 @@
         }
         if (!rendered.length) return null;
 
-        const wrapper = h('div', { className: 'flex justify-start' });
+        // Use the latest message's timestamp
+        const lastMsg = messages[messages.length - 1];
+        const ts = formatTime(lastMsg?.info?.time?.created || lastMsg?.info?.time?.completed);
+
+        const wrapper = h('div', { className: 'flex flex-col items-start gap-1' });
         const bubble = h('div', {
             className: 'max-w-3xl rounded-lg px-4 py-3 bg-gray-800 border border-gray-700 space-y-2',
         });
         for (const el of rendered) bubble.appendChild(el);
         wrapper.appendChild(bubble);
+        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-600 px-1', textContent: ts }));
         return wrapper;
     }
 
