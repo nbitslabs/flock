@@ -31,3 +31,5 @@ config.json
 *.db
 data/
 .env
+
+flock.db*
