@@ -19,21 +19,6 @@ func NewGitHub(workingDir string) *GitHub {
 	return gh
 }
 
-func (g *GitHub) ReactToIssue(ctx context.Context, issueNumber int, reaction string) error {
-	if g.repo == "" {
-		return fmt.Errorf("github: no repo configured")
-	}
-	cmd := exec.CommandContext(ctx, "gh", "issue", "react", fmt.Sprintf("%d", issueNumber), "--repo", g.repo, "-o", reaction)
-	cmd.Dir = g.workingDir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("github: failed to react to issue #%d with %s: %v (%s)", issueNumber, reaction, err, string(out))
-		return err
-	}
-	log.Printf("github: reacted to issue #%d with %s", issueNumber, reaction)
-	return nil
-}
-
 func (g *GitHub) CommentOnIssue(ctx context.Context, issueNumber int, comment string) error {
 	if g.repo == "" {
 		return fmt.Errorf("github: no repo configured")
