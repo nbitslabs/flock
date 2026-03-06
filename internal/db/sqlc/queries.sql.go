@@ -254,6 +254,30 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 	return i, err
 }
 
+const getTaskByID = `-- name: GetTaskByID :one
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE id = ?
+`
+
+func (q *Queries) GetTaskByID(ctx context.Context, id string) (Task, error) {
+	row := q.db.QueryRowContext(ctx, getTaskByID, id)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.IssueNumber,
+		&i.IssueUrl,
+		&i.Title,
+		&i.Status,
+		&i.SessionID,
+		&i.BranchName,
+		&i.PrUrl,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTaskByIssue = `-- name: GetTaskByIssue :one
 SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? AND issue_number = ?
 `

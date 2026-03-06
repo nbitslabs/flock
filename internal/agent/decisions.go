@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/google/uuid"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
@@ -97,6 +100,12 @@ func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instance
 	}
 
 	for _, d := range decisions {
+		task, err := dp.queries.GetTaskByID(ctx, d.TaskID)
+		if err != nil {
+			log.Printf("agent: failed to get task %s: %v", d.TaskID, err)
+			continue
+		}
+
 		if err := dp.queries.UpdateTaskStatus(ctx, sqlc.UpdateTaskStatusParams{
 			Status: "completed",
 			ID:     d.TaskID,
@@ -104,6 +113,11 @@ func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instance
 			log.Printf("agent: failed to mark task %s as completed: %v", d.TaskID, err)
 			continue
 		}
+
+		if err := removeWorktree(workingDir, task.BranchName); err != nil {
+			log.Printf("agent: failed to remove worktree for branch %s: %v", task.BranchName, err)
+		}
+
 		log.Printf("agent: marked task %s as completed (%s)", truncID(d.TaskID), d.Reason)
 	}
 }
@@ -132,4 +146,22 @@ func (dp *DecisionProcessor) processRestarts(ctx context.Context, instanceID, wo
 			}
 		}
 	}
+}
+
+func removeWorktree(workingDir, branchName string) error {
+	worktreePath := filepath.Join(workingDir, ".flock", "worktrees", branchName)
+
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return nil
+	}
+
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = workingDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree remove failed: %w, output: %s", err, string(output))
+	}
+
+	log.Printf("agent: removed worktree at %s", worktreePath)
+	return nil
 }

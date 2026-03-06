@@ -49,6 +49,9 @@ RETURNING *;
 -- name: GetTaskByIssue :one
 SELECT * FROM tasks WHERE instance_id = ? AND issue_number = ?;
 
+-- name: GetTaskByID :one
+SELECT * FROM tasks WHERE id = ?;
+
 -- name: ListTasksByInstance :many
 SELECT * FROM tasks WHERE instance_id = ? ORDER BY created_at DESC;
 
