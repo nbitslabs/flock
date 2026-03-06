@@ -14,7 +14,8 @@ const (
 	heartbeatFile = "HEARTBEAT.md"
 	memoryFile   = "MEMORY.md"
 	newTasksFile = "new_tasks.json"
-	restartFile  = "restart_tasks.json"
+	restartFile    = "restart_tasks.json"
+	completedFile  = "completed_tasks.json"
 )
 
 // NewTaskDecision represents a new task from the orchestrator's decision file.
@@ -27,6 +28,12 @@ type NewTaskDecision struct {
 
 // RestartTaskDecision represents a task restart request from the orchestrator.
 type RestartTaskDecision struct {
+	TaskID string `json:"task_id"`
+	Reason string `json:"reason"`
+}
+
+// CompletedTaskDecision represents a task that the orchestrator has identified as completed.
+type CompletedTaskDecision struct {
 	TaskID string `json:"task_id"`
 	Reason string `json:"reason"`
 }
@@ -143,8 +150,26 @@ func ReadRestartTasks(workingDir string) ([]RestartTaskDecision, error) {
 	return tasks, nil
 }
 
+// ReadCompletedTasks reads and parses .flock/memory/completed_tasks.json.
+func ReadCompletedTasks(workingDir string) ([]CompletedTaskDecision, error) {
+	path := filepath.Join(workingDir, memoryDir, completedFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var tasks []CompletedTaskDecision
+	if err := json.Unmarshal(data, &tasks); err != nil {
+		return nil, fmt.Errorf("parse completed_tasks.json: %w", err)
+	}
+	return tasks, nil
+}
+
 // ClearDecisionFiles removes the decision files after processing.
 func ClearDecisionFiles(workingDir string) {
 	os.Remove(filepath.Join(workingDir, memoryDir, newTasksFile))
 	os.Remove(filepath.Join(workingDir, memoryDir, restartFile))
+	os.Remove(filepath.Join(workingDir, memoryDir, completedFile))
 }

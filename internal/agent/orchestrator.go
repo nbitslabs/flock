@@ -173,8 +173,13 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	if err == nil && len(tasks) > 0 {
 		sb.WriteString("## Active Tasks\n\n")
 		for _, t := range tasks {
-			sb.WriteString(fmt.Sprintf("- **#%d** %s (status: %s, session: %s, branch: %s)\n",
-				t.IssueNumber, t.Title, t.Status, truncID(t.SessionID), t.BranchName))
+			line := fmt.Sprintf("- **#%d** %s (status: %s, task_id: %s, branch: %s",
+				t.IssueNumber, t.Title, t.Status, t.ID, t.BranchName)
+			if t.PrUrl != "" {
+				line += fmt.Sprintf(", pr_url: %s", t.PrUrl)
+			}
+			line += ")\n"
+			sb.WriteString(line)
 		}
 		sb.WriteString("\n")
 	} else {
@@ -197,10 +202,12 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 
 	sb.WriteString("## Instructions\n")
 	sb.WriteString("1. Run `gh issue list --assignee=@me --state=open --json number,url,title`\n")
-	sb.WriteString("2. Compare with active tasks above\n")
-	sb.WriteString("3. Write `.flock/memory/new_tasks.json` for new issues\n")
-	sb.WriteString("4. Write `.flock/memory/restart_tasks.json` for stuck tasks needing restart\n")
-	sb.WriteString("5. Update `.flock/memory/MEMORY.md` with any observations\n")
+	sb.WriteString("2. For each active/stuck task above, check if its issue is closed: `gh issue view <number> --json state -q .state`\n")
+	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged: `gh pr view <pr_url> --json state -q .state`\n")
+	sb.WriteString("4. Write `.flock/memory/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
+	sb.WriteString("5. Compare issue list with active tasks and write `.flock/memory/new_tasks.json` for new issues\n")
+	sb.WriteString("6. Write `.flock/memory/restart_tasks.json` for stuck tasks needing restart\n")
+	sb.WriteString("7. Update `.flock/memory/MEMORY.md` with any observations\n")
 
 	return sb.String()
 }

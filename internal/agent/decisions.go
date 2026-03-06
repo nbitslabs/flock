@@ -24,8 +24,9 @@ func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workin
 }
 
 // ProcessDecisions reads decision files from the working directory,
-// creates sub-agent sessions for new tasks and restarts stuck ones.
+// creates sub-agent sessions for new tasks, marks completed tasks, and restarts stuck ones.
 func (dp *DecisionProcessor) ProcessDecisions(ctx context.Context, instanceID, workingDir string) {
+	dp.processCompletedTasks(ctx, instanceID, workingDir)
 	dp.processNewTasks(ctx, instanceID, workingDir)
 	dp.processRestarts(ctx, instanceID, workingDir)
 	memory.ClearDecisionFiles(workingDir)
@@ -84,6 +85,25 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 		if err := gh.CommentOnIssue(ctx, d.IssueNumber, comment); err != nil {
 			log.Printf("agent: failed to comment on issue #%d: %v", d.IssueNumber, err)
 		}
+	}
+}
+
+func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instanceID, workingDir string) {
+	decisions, err := memory.ReadCompletedTasks(workingDir)
+	if err != nil {
+		log.Printf("agent: failed to read completed_tasks.json: %v", err)
+		return
+	}
+
+	for _, d := range decisions {
+		if err := dp.queries.UpdateTaskStatus(ctx, sqlc.UpdateTaskStatusParams{
+			Status: "completed",
+			ID:     d.TaskID,
+		}); err != nil {
+			log.Printf("agent: failed to mark task %s as completed: %v", d.TaskID, err)
+			continue
+		}
+		log.Printf("agent: marked task %s as completed (%s)", truncID(d.TaskID), d.Reason)
 	}
 }
 
