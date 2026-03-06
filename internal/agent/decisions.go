@@ -144,24 +144,11 @@ func removeWorktree(workingDir, branchName string) error {
 
 	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = workingDir
-	_, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("agent: git worktree remove failed, trying chmod + rm: %v", err)
+		return fmt.Errorf("git worktree remove failed: %w, output: %s", err, string(output))
 	}
 
-	if err == nil {
-		log.Printf("agent: removed worktree at %s", worktreePath)
-		return nil
-	}
-
-	if chmodCmd := exec.Command("chmod", "-R", "u+w", worktreePath); chmodCmd.Run() != nil {
-		log.Printf("agent: chmod failed, trying rm -rf")
-	}
-
-	if rmCmd := exec.Command("rm", "-rf", worktreePath); rmCmd.Run() != nil {
-		return fmt.Errorf("failed to remove worktree: git worktree remove and rm -rf both failed")
-	}
-
-	log.Printf("agent: removed worktree at %s using rm -rf", worktreePath)
+	log.Printf("agent: removed worktree at %s", worktreePath)
 	return nil
 }
