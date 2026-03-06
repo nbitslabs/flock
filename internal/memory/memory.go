@@ -8,14 +8,14 @@ import (
 )
 
 const (
-	flockDir     = ".flock"
-	memoryDir    = ".flock/memory"
-	progressDir  = ".flock/memory/progress"
+	flockDir      = ".flock"
+	memoryDir     = ".flock/memory"
+	progressDir   = ".flock/memory/progress"
 	heartbeatFile = "HEARTBEAT.md"
-	memoryFile   = "MEMORY.md"
-	newTasksFile = "new_tasks.json"
-	restartFile    = "restart_tasks.json"
-	completedFile  = "completed_tasks.json"
+	memoryFile    = "MEMORY.md"
+	newTasksFile  = "new_tasks.json"
+	restartFile   = "restart_tasks.json"
+	completedFile = "completed_tasks.json"
 )
 
 // NewTaskDecision represents a new task from the orchestrator's decision file.
