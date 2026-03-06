@@ -4,6 +4,15 @@
 
 package sqlc
 
+type FlockAgentSession struct {
+	ID               string
+	SessionID        string
+	WorkingDirectory string
+	Status           string
+	CreatedAt        string
+	UpdatedAt        string
+}
+
 type Instance struct {
 	ID               string
 	Pid              int64
