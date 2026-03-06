@@ -55,9 +55,12 @@
         <!-- Messages -->
         <div id="messages" class="flex-1 overflow-y-auto custom-scrollbar">
             <div id="messages-inner" class="max-w-4xl mx-auto p-4 space-y-4">
-                <div class="flex items-center justify-center h-full text-gray-600 py-20">
-                    <p>No messages yet. Create an instance and session to begin.</p>
+                <div id="settled-messages">
+                    <div class="flex items-center justify-center text-gray-600 py-20">
+                        <p>No messages yet. Create an instance and session to begin.</p>
+                    </div>
                 </div>
+                <div id="streaming-area" class="hidden"></div>
             </div>
         </div>
 
