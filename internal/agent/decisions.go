@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log"
 
 	"github.com/google/uuid"
@@ -13,12 +14,13 @@ import (
 // DecisionProcessor reads decision files written by the orchestrator and
 // creates/restarts sub-agent sessions accordingly.
 type DecisionProcessor struct {
-	client  *opencode.Client
-	queries *sqlc.Queries
+	client     *opencode.Client
+	queries    *sqlc.Queries
+	workingDir string
 }
 
-func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries) *DecisionProcessor {
-	return &DecisionProcessor{client: client, queries: queries}
+func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workingDir string) *DecisionProcessor {
+	return &DecisionProcessor{client: client, queries: queries, workingDir: workingDir}
 }
 
 // ProcessDecisions reads decision files from the working directory,
@@ -36,6 +38,8 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 		return
 	}
 
+	gh := NewGitHub(workingDir)
+
 	for _, d := range decisions {
 		// Dedup: check if task already exists for this issue
 		if _, err := dp.queries.GetTaskByIssue(ctx, sqlc.GetTaskByIssueParams{
@@ -44,6 +48,11 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 		}); err == nil {
 			log.Printf("agent: task for issue #%d already exists, skipping", d.IssueNumber)
 			continue
+		}
+
+		// React to the issue with 👀 when first detected
+		if err := gh.ReactToIssue(ctx, d.IssueNumber, "eyes"); err != nil {
+			log.Printf("agent: failed to react to issue #%d: %v", d.IssueNumber, err)
 		}
 
 		taskID := uuid.New().String()
@@ -67,6 +76,13 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 				Status: "failed",
 				ID:     taskID,
 			})
+			continue
+		}
+
+		// Comment that we're looking at the issue with the branch name
+		comment := fmt.Sprintf("I'm looking at this issue now. I'll be working on it in the `%s` branch.", d.BranchName)
+		if err := gh.CommentOnIssue(ctx, d.IssueNumber, comment); err != nil {
+			log.Printf("agent: failed to comment on issue #%d: %v", d.IssueNumber, err)
 		}
 	}
 }
