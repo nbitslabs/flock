@@ -207,7 +207,8 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	sb.WriteString("4. Write `.flock/memory/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
 	sb.WriteString("5. Compare issue list with active tasks and write `.flock/memory/new_tasks.json` for new issues\n")
 	sb.WriteString("6. Write `.flock/memory/restart_tasks.json` for stuck tasks needing restart\n")
-	sb.WriteString("7. Update `.flock/memory/MEMORY.md` with any observations\n")
+	sb.WriteString("7. For each completed task, remove its worktree: `git worktree remove <worktree_path>` (path is `.flock/worktrees/<branch_name>`)\n")
+	sb.WriteString("8. Update `.flock/memory/MEMORY.md` with any observations\n")
 
 	return sb.String()
 }
