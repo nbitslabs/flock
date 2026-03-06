@@ -17,10 +17,11 @@ type DecisionProcessor struct {
 	client     *opencode.Client
 	queries    *sqlc.Queries
 	workingDir string
+	dataDir    string
 }
 
-func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workingDir string) *DecisionProcessor {
-	return &DecisionProcessor{client: client, queries: queries, workingDir: workingDir}
+func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workingDir, dataDir string) *DecisionProcessor {
+	return &DecisionProcessor{client: client, queries: queries, workingDir: workingDir, dataDir: dataDir}
 }
 
 // ProcessDecisions reads decision files from the working directory,
@@ -39,7 +40,7 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 		return
 	}
 
-	gh := NewGitHub(workingDir)
+	gh := NewGitHub(dp.dataDir)
 
 	for _, d := range decisions {
 		// Dedup: check if task already exists for this issue

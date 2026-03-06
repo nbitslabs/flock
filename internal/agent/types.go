@@ -5,6 +5,7 @@ import "time"
 // AgentConfig holds configuration for the agent harness.
 type AgentConfig struct {
 	Enabled                 bool          `toml:"enabled"`
+	DataDir                 string        `toml:"data_dir"`
 	HeartbeatInterval       time.Duration `toml:"-"`
 	HeartbeatIntervalSecs   int           `toml:"heartbeat_interval_secs"`
 	StuckThresholdSecs      int           `toml:"stuck_threshold_secs"`

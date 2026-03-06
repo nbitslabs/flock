@@ -23,6 +23,7 @@ type Harness struct {
 	cancel     context.CancelFunc
 	// subscribeFn is set by the caller to provide internal SSE subscriptions.
 	subscribeFn func(sessionID string) (<-chan string, func())
+	dataDir    string
 }
 
 // NewHarness creates a new agent harness.
@@ -31,6 +32,7 @@ func NewHarness(
 	queries *sqlc.Queries,
 	cfg AgentConfig,
 	subscribeFn func(sessionID string) (<-chan string, func()),
+	dataDir string,
 ) *Harness {
 	cfg.Resolve()
 	return &Harness{
@@ -40,6 +42,7 @@ func NewHarness(
 		queries:     queries,
 		cfg:         cfg,
 		subscribeFn: subscribeFn,
+		dataDir:    dataDir,
 	}
 }
 
@@ -83,7 +86,7 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 	}
 
 	orch := NewOrchestrator(h.client, h.queries, instanceID, workingDir, h.cfg, h.subscribeFn)
-	proc := NewDecisionProcessor(h.client, h.queries, workingDir)
+	proc := NewDecisionProcessor(h.client, h.queries, workingDir, h.dataDir)
 	sched := NewScheduler(instanceID, workingDir, h.cfg, orch, proc, h.queries, h.client)
 	sched.Start(h.ctx)
 
