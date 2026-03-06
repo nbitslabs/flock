@@ -35,6 +35,36 @@ func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) 
 	return i, err
 }
 
+const createOrchestratorSession = `-- name: CreateOrchestratorSession :one
+
+INSERT INTO orchestrator_sessions (id, instance_id, session_id, status)
+VALUES (?, ?, ?, 'active')
+RETURNING id, instance_id, session_id, heartbeat_count, last_heartbeat_at, status, created_at, updated_at
+`
+
+type CreateOrchestratorSessionParams struct {
+	ID         string
+	InstanceID string
+	SessionID  string
+}
+
+// Orchestrator session queries
+func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrchestratorSessionParams) (OrchestratorSession, error) {
+	row := q.db.QueryRowContext(ctx, createOrchestratorSession, arg.ID, arg.InstanceID, arg.SessionID)
+	var i OrchestratorSession
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.SessionID,
+		&i.HeartbeatCount,
+		&i.LastHeartbeatAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, instance_id, title, status)
 VALUES (?, ?, ?, ?)
@@ -67,12 +97,69 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
+const createTask = `-- name: CreateTask :one
+
+INSERT INTO tasks (id, instance_id, issue_number, issue_url, title, status, session_id, branch_name)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at
+`
+
+type CreateTaskParams struct {
+	ID          string
+	InstanceID  string
+	IssueNumber int64
+	IssueUrl    string
+	Title       string
+	Status      string
+	SessionID   string
+	BranchName  string
+}
+
+// Task queries
+func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error) {
+	row := q.db.QueryRowContext(ctx, createTask,
+		arg.ID,
+		arg.InstanceID,
+		arg.IssueNumber,
+		arg.IssueUrl,
+		arg.Title,
+		arg.Status,
+		arg.SessionID,
+		arg.BranchName,
+	)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.IssueNumber,
+		&i.IssueUrl,
+		&i.Title,
+		&i.Status,
+		&i.SessionID,
+		&i.BranchName,
+		&i.PrUrl,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteInstance = `-- name: DeleteInstance :exec
 DELETE FROM instances WHERE id = ?
 `
 
 func (q *Queries) DeleteInstance(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteInstance, id)
+	return err
+}
+
+const deleteOrchestratorSessionsByInstance = `-- name: DeleteOrchestratorSessionsByInstance :exec
+DELETE FROM orchestrator_sessions WHERE instance_id = ?
+`
+
+func (q *Queries) DeleteOrchestratorSessionsByInstance(ctx context.Context, instanceID string) error {
+	_, err := q.db.ExecContext(ctx, deleteOrchestratorSessionsByInstance, instanceID)
 	return err
 }
 
@@ -83,6 +170,37 @@ DELETE FROM sessions WHERE instance_id = ?
 func (q *Queries) DeleteSessionsByInstance(ctx context.Context, instanceID string) error {
 	_, err := q.db.ExecContext(ctx, deleteSessionsByInstance, instanceID)
 	return err
+}
+
+const deleteTasksByInstance = `-- name: DeleteTasksByInstance :exec
+DELETE FROM tasks WHERE instance_id = ?
+`
+
+func (q *Queries) DeleteTasksByInstance(ctx context.Context, instanceID string) error {
+	_, err := q.db.ExecContext(ctx, deleteTasksByInstance, instanceID)
+	return err
+}
+
+const getActiveOrchestratorSession = `-- name: GetActiveOrchestratorSession :one
+SELECT id, instance_id, session_id, heartbeat_count, last_heartbeat_at, status, created_at, updated_at FROM orchestrator_sessions
+WHERE instance_id = ? AND status = 'active'
+LIMIT 1
+`
+
+func (q *Queries) GetActiveOrchestratorSession(ctx context.Context, instanceID string) (OrchestratorSession, error) {
+	row := q.db.QueryRowContext(ctx, getActiveOrchestratorSession, instanceID)
+	var i OrchestratorSession
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.SessionID,
+		&i.HeartbeatCount,
+		&i.LastHeartbeatAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getInstance = `-- name: GetInstance :one
@@ -120,6 +238,100 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getTaskByIssue = `-- name: GetTaskByIssue :one
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? AND issue_number = ?
+`
+
+type GetTaskByIssueParams struct {
+	InstanceID  string
+	IssueNumber int64
+}
+
+func (q *Queries) GetTaskByIssue(ctx context.Context, arg GetTaskByIssueParams) (Task, error) {
+	row := q.db.QueryRowContext(ctx, getTaskByIssue, arg.InstanceID, arg.IssueNumber)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.IssueNumber,
+		&i.IssueUrl,
+		&i.Title,
+		&i.Status,
+		&i.SessionID,
+		&i.BranchName,
+		&i.PrUrl,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const incrementHeartbeatCount = `-- name: IncrementHeartbeatCount :exec
+UPDATE orchestrator_sessions
+SET heartbeat_count = heartbeat_count + 1, last_heartbeat_at = datetime('now'), updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) IncrementHeartbeatCount(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, incrementHeartbeatCount, id)
+	return err
+}
+
+const getLastHeartbeatByInstance = `-- name: GetLastHeartbeatByInstance :one
+SELECT last_heartbeat_at FROM orchestrator_sessions
+WHERE instance_id = ? AND status = 'active'
+ORDER BY last_heartbeat_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getLastHeartbeatByInstance, instanceID)
+	var lastHeartbeatAt string
+	err := row.Scan(&lastHeartbeatAt)
+	return lastHeartbeatAt, err
+}
+
+const listActiveTasks = `-- name: ListActiveTasks :many
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? AND status IN ('pending', 'active') ORDER BY created_at ASC
+`
+
+func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveTasks, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.IssueNumber,
+			&i.IssueUrl,
+			&i.Title,
+			&i.Status,
+			&i.SessionID,
+			&i.BranchName,
+			&i.PrUrl,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInstances = `-- name: ListInstances :many
@@ -191,6 +403,104 @@ func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string)
 	return items, nil
 }
 
+const listStuckTasks = `-- name: ListStuckTasks :many
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks
+WHERE instance_id = ? AND status = 'active'
+AND last_activity_at < datetime('now', '-' || cast(? as text) || ' seconds')
+`
+
+type ListStuckTasksParams struct {
+	InstanceID string
+	Column2    string
+}
+
+func (q *Queries) ListStuckTasks(ctx context.Context, arg ListStuckTasksParams) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, listStuckTasks, arg.InstanceID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.IssueNumber,
+			&i.IssueUrl,
+			&i.Title,
+			&i.Status,
+			&i.SessionID,
+			&i.BranchName,
+			&i.PrUrl,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTasksByInstance = `-- name: ListTasksByInstance :many
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? ORDER BY created_at DESC
+`
+
+func (q *Queries) ListTasksByInstance(ctx context.Context, instanceID string) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, listTasksByInstance, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.IssueNumber,
+			&i.IssueUrl,
+			&i.Title,
+			&i.Status,
+			&i.SessionID,
+			&i.BranchName,
+			&i.PrUrl,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const retireOrchestratorSession = `-- name: RetireOrchestratorSession :exec
+UPDATE orchestrator_sessions
+SET status = 'retired', updated_at = datetime('now')
+WHERE id = ?
+`
+
+func (q *Queries) RetireOrchestratorSession(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, retireOrchestratorSession, id)
+	return err
+}
+
 const updateInstanceStatus = `-- name: UpdateInstanceStatus :exec
 UPDATE instances SET status = ?, updated_at = datetime('now') WHERE id = ?
 `
@@ -216,6 +526,57 @@ type UpdateSessionStatusParams struct {
 
 func (q *Queries) UpdateSessionStatus(ctx context.Context, arg UpdateSessionStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateSessionStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateTaskActivity = `-- name: UpdateTaskActivity :exec
+UPDATE tasks SET last_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?
+`
+
+func (q *Queries) UpdateTaskActivity(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, updateTaskActivity, id)
+	return err
+}
+
+const updateTaskPR = `-- name: UpdateTaskPR :exec
+UPDATE tasks SET pr_url = ?, status = 'completed', updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateTaskPRParams struct {
+	PrUrl string
+	ID    string
+}
+
+func (q *Queries) UpdateTaskPR(ctx context.Context, arg UpdateTaskPRParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskPR, arg.PrUrl, arg.ID)
+	return err
+}
+
+const updateTaskSession = `-- name: UpdateTaskSession :exec
+UPDATE tasks SET session_id = ?, updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateTaskSessionParams struct {
+	SessionID string
+	ID        string
+}
+
+func (q *Queries) UpdateTaskSession(ctx context.Context, arg UpdateTaskSessionParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskSession, arg.SessionID, arg.ID)
+	return err
+}
+
+const updateTaskStatus = `-- name: UpdateTaskStatus :exec
+UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateTaskStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskStatus, arg.Status, arg.ID)
 	return err
 }
 

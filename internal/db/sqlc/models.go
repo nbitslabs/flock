@@ -14,6 +14,17 @@ type Instance struct {
 	UpdatedAt        string
 }
 
+type OrchestratorSession struct {
+	ID             string
+	InstanceID     string
+	SessionID      string
+	HeartbeatCount int64
+	LastHeartbeatAt string
+	Status         string
+	CreatedAt      string
+	UpdatedAt      string
+}
+
 type Session struct {
 	ID         string
 	InstanceID string
@@ -21,4 +32,19 @@ type Session struct {
 	Status     string
 	CreatedAt  string
 	UpdatedAt  string
+}
+
+type Task struct {
+	ID             string
+	InstanceID     string
+	IssueNumber    int64
+	IssueUrl       string
+	Title          string
+	Status         string
+	SessionID      string
+	BranchName     string
+	PrUrl          string
+	LastActivityAt string
+	CreatedAt      string
+	UpdatedAt      string
 }
