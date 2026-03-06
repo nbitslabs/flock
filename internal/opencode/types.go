@@ -1,5 +1,7 @@
 package opencode
 
+import "encoding/json"
+
 // OpenCode API types — matches the actual opencode serve API responses
 
 type SessionTime struct {
@@ -34,8 +36,8 @@ type MessageInfo struct {
 }
 
 type Message struct {
-	Info  MessageInfo `json:"info"`
-	Parts []Part      `json:"parts"`
+	Info  MessageInfo       `json:"info"`
+	Parts []json.RawMessage `json:"parts"`
 }
 
 type Part struct {
