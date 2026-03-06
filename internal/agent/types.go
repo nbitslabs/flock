@@ -4,23 +4,23 @@ import "time"
 
 // AgentConfig holds configuration for the agent harness.
 type AgentConfig struct {
-	Enabled                  bool          `toml:"enabled"`
-	HeartbeatInterval        time.Duration `toml:"-"`
-	HeartbeatIntervalSecs    int           `toml:"heartbeat_interval_secs"`
-	StuckThresholdSecs       int           `toml:"stuck_threshold_secs"`
-	MaxHeartbeatsPerSession  int           `toml:"max_heartbeats_per_session"`
-	WaitForIdleTimeout       time.Duration `toml:"-"`
-	WaitForIdleTimeoutSecs   int           `toml:"wait_for_idle_timeout_secs"`
+	Enabled                 bool          `toml:"enabled"`
+	HeartbeatInterval       time.Duration `toml:"-"`
+	HeartbeatIntervalSecs   int           `toml:"heartbeat_interval_secs"`
+	StuckThresholdSecs      int           `toml:"stuck_threshold_secs"`
+	MaxHeartbeatsPerSession int           `toml:"max_heartbeats_per_session"`
+	WaitForIdleTimeout      time.Duration `toml:"-"`
+	WaitForIdleTimeoutSecs  int           `toml:"wait_for_idle_timeout_secs"`
 }
 
 // DefaultAgentConfig returns sensible defaults.
 func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		Enabled:                 false,
-		HeartbeatIntervalSecs:   300,  // 5 minutes
-		StuckThresholdSecs:      600,  // 10 minutes
-		MaxHeartbeatsPerSession: 20,   // ~100 minutes before rotation
-		WaitForIdleTimeoutSecs:  180,  // 3 minutes
+		HeartbeatIntervalSecs:   300, // 5 minutes
+		StuckThresholdSecs:      600, // 10 minutes
+		MaxHeartbeatsPerSession: 20,  // ~100 minutes before rotation
+		WaitForIdleTimeoutSecs:  180, // 3 minutes
 	}
 }
 
