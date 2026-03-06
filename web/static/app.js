@@ -20,6 +20,7 @@
         _instanceHash: '',
         _lastSentText: null,  // track user message to filter streaming echoes
         _sessionHash: '',
+        _darkMode: true,
     };
 
     // =========================================================================
@@ -65,6 +66,54 @@
     }
 
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    // =========================================================================
+    // Section 3 — Theme
+    // =========================================================================
+
+    function isDarkMode() { return store._darkMode; }
+
+    function toggleTheme() {
+        store._darkMode = !store._darkMode;
+        const html = document.documentElement;
+        if (store._darkMode) {
+            html.classList.add('dark');
+        } else {
+            html.classList.remove('dark');
+        }
+        localStorage.setItem('theme', store._darkMode ? 'dark' : 'light');
+        renderMessages();
+        renderStreamingArea();
+        renderInstances();
+        renderSessions();
+    }
+
+    function initTheme() {
+        const saved = localStorage.getItem('theme');
+        if (saved) {
+            store._darkMode = saved === 'dark';
+        } else {
+            store._darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        }
+        const html = document.documentElement;
+        if (store._darkMode) {
+            html.classList.add('dark');
+        } else {
+            html.classList.remove('dark');
+        }
+    }
+
+    function getTextColorClass(light, dark) {
+        return isDarkMode() ? dark : light;
+    }
+
+    function getBgColorClass(light, dark) {
+        return isDarkMode() ? dark : light;
+    }
+
+    function getBorderColorClass(light, dark) {
+        return isDarkMode() ? dark : light;
+    }
 
     // =========================================================================
     // Section 3 — API
@@ -481,7 +530,7 @@
 
         settled.textContent = '';
         if (!frag.childNodes.length && !store.streamingParts.size) {
-            settled.innerHTML = '<div class="flex items-center justify-center text-gray-600 py-20"><p>No messages yet.</p></div>';
+            settled.innerHTML = '<div class="flex items-center justify-center text-gray-500 dark:text-gray-600 py-20"><p>No messages yet.</p></div>';
         } else {
             settled.appendChild(frag);
         }
@@ -498,7 +547,7 @@
             className: `max-w-3xl rounded-lg px-4 py-3 bg-blue-600 ${msg._optimistic ? 'opacity-60' : ''}`,
         }, h('pre', { className: 'whitespace-pre-wrap text-sm leading-relaxed', textContent: text })));
         const ts = formatTime(msg.info?.time?.created);
-        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-600 px-1', textContent: ts }));
+        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-500 dark:text-gray-600 px-1', textContent: ts }));
         return wrapper;
     }
 
@@ -526,11 +575,11 @@
 
         const wrapper = h('div', { className: 'flex flex-col items-start gap-1' });
         const bubble = h('div', {
-            className: 'max-w-3xl rounded-lg px-4 py-3 bg-gray-800 border border-gray-700 space-y-2',
+            className: 'max-w-3xl rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 space-y-2',
         });
         for (const el of rendered) bubble.appendChild(el);
         wrapper.appendChild(bubble);
-        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-600 px-1', textContent: ts }));
+        if (ts) wrapper.appendChild(h('span', { className: 'text-xs text-gray-500 dark:text-gray-600 px-1', textContent: ts }));
         return wrapper;
     }
 
@@ -597,13 +646,13 @@
 
         // Summary line: ● toolName — title
         const summary = h('summary', {
-            className: 'flex items-center gap-2 cursor-pointer text-sm text-gray-300 hover:text-gray-100 select-none list-none py-0.5',
+            className: 'flex items-center gap-2 cursor-pointer text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 select-none list-none py-0.5',
         });
         summary.appendChild(h('span', { className: `w-2 h-2 rounded-full ${dotClass} flex-shrink-0` }));
-        summary.appendChild(h('code', { className: 'text-xs font-mono text-gray-300', textContent: toolName }));
+        summary.appendChild(h('code', { className: 'text-xs font-mono text-gray-600 dark:text-gray-300', textContent: toolName }));
         if (title) {
-            summary.appendChild(h('span', { className: 'text-gray-500', textContent: '—' }));
-            summary.appendChild(h('span', { className: 'text-xs text-gray-400 truncate', textContent: title }));
+            summary.appendChild(h('span', { className: 'text-gray-400 dark:text-gray-500', textContent: '—' }));
+            summary.appendChild(h('span', { className: 'text-xs text-gray-500 dark:text-gray-400 truncate', textContent: title }));
         }
         if (status === 'running') {
             summary.appendChild(h('span', { className: 'text-xs text-yellow-500 animate-pulse', textContent: 'running…' }));
@@ -616,7 +665,7 @@
         if (input) {
             const inputStr = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
             if (inputStr && inputStr !== '{}' && inputStr !== 'null') {
-                const pre = h('pre', { className: 'bg-gray-900 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto text-gray-400 custom-scrollbar' });
+                const pre = h('pre', { className: 'bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto text-gray-600 dark:text-gray-400 custom-scrollbar' });
                 pre.appendChild(h('code', { textContent: inputStr }));
                 body.appendChild(pre);
             }
@@ -625,8 +674,8 @@
         if (output) {
             const outputStr = typeof output === 'string' ? output : JSON.stringify(output, null, 2);
             if (outputStr) {
-                body.appendChild(h('div', { className: 'text-gray-500', textContent: 'Output:' }));
-                const pre = h('pre', { className: 'bg-gray-900 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto text-gray-400 custom-scrollbar' });
+                body.appendChild(h('div', { className: 'text-gray-400 dark:text-gray-500', textContent: 'Output:' }));
+                const pre = h('pre', { className: 'bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto text-gray-600 dark:text-gray-400 custom-scrollbar' });
                 pre.appendChild(h('code', { textContent: outputStr }));
                 body.appendChild(pre);
             }
@@ -642,12 +691,12 @@
         const str = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
         const details = h('details', { className: 'my-1' });
         const summary = h('summary', {
-            className: 'flex items-center gap-2 cursor-pointer text-sm text-gray-400 hover:text-gray-200 select-none list-none py-0.5',
+            className: 'flex items-center gap-2 cursor-pointer text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 select-none list-none py-0.5',
         });
         summary.appendChild(h('span', { className: 'w-2 h-2 rounded-full bg-gray-500 flex-shrink-0' }));
         summary.appendChild(h('span', { className: 'text-xs', textContent: 'Tool Result' }));
         details.appendChild(summary);
-        const pre = h('pre', { className: 'mt-1.5 ml-4 bg-gray-900 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto text-xs text-gray-400 custom-scrollbar' });
+        const pre = h('pre', { className: 'mt-1.5 ml-4 bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto text-xs text-gray-600 dark:text-gray-400 custom-scrollbar' });
         pre.appendChild(h('code', { textContent: str }));
         details.appendChild(pre);
         return details;
@@ -658,11 +707,11 @@
         if (!text.trim()) return null;
         const details = h('details', { className: 'my-1' });
         details.appendChild(h('summary', {
-            className: 'cursor-pointer text-sm text-gray-500 hover:text-gray-300 italic select-none list-none py-0.5',
+            className: 'cursor-pointer text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 italic select-none list-none py-0.5',
             textContent: 'Thinking…',
         }));
         details.appendChild(h('div', {
-            className: 'mt-1 ml-4 text-sm text-gray-400 italic whitespace-pre-wrap',
+            className: 'mt-1 ml-4 text-sm text-gray-500 dark:text-gray-400 italic whitespace-pre-wrap',
             textContent: text,
         }));
         return details;
@@ -676,10 +725,10 @@
         if (!keys.length) return null;
         const details = h('details', { className: 'my-1' });
         details.appendChild(h('summary', {
-            className: 'cursor-pointer text-xs text-gray-600 hover:text-gray-400 select-none list-none',
+            className: 'cursor-pointer text-xs text-gray-500 dark:text-gray-600 hover:text-gray-700 dark:hover:text-gray-400 select-none list-none',
             textContent: `[${part.type || 'unknown'}]`,
         }));
-        const pre = h('pre', { className: 'mt-1 ml-4 bg-gray-900 rounded p-2 overflow-x-auto max-h-32 overflow-y-auto text-xs text-gray-500 custom-scrollbar' });
+        const pre = h('pre', { className: 'mt-1 ml-4 bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-x-auto max-h-32 overflow-y-auto text-xs text-gray-500 dark:text-gray-500 custom-scrollbar' });
         pre.appendChild(h('code', { textContent: json }));
         details.appendChild(pre);
         return details;
@@ -717,7 +766,7 @@
         }
 
         const bubble = h('div', {
-            className: 'max-w-3xl rounded-lg px-4 py-3 bg-gray-800 border border-gray-700 border-dashed space-y-2',
+            className: 'max-w-3xl rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-dashed space-y-2',
         });
 
         // Reasoning
@@ -727,10 +776,10 @@
             const d = h('details', { className: 'my-1' });
             d.setAttribute('open', '');
             d.appendChild(h('summary', {
-                className: 'cursor-pointer text-sm text-gray-500 italic select-none list-none',
+                className: 'cursor-pointer text-sm text-gray-400 dark:text-gray-500 italic select-none list-none',
                 textContent: 'Thinking…',
             }));
-            d.appendChild(h('div', { className: 'mt-1 text-sm text-gray-400 italic whitespace-pre-wrap', textContent: text }));
+            d.appendChild(h('div', { className: 'mt-1 text-sm text-gray-500 dark:text-gray-400 italic whitespace-pre-wrap', textContent: text }));
             bubble.appendChild(d);
         }
 
@@ -765,25 +814,25 @@
         const list = document.getElementById('instance-list');
         if (!list) return;
         const items = Array.from(store.instances.values());
-        if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-500 py-2">No instances running</p>'; return; }
+        if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 py-2">No instances running</p>'; return; }
         reconcileList(list, items, i => i.id, createInstanceEl, updateInstanceEl);
     }
 
     function createInstanceEl(inst) {
         const sel = inst.id === store.selectedInstanceId;
         const div = h('div', {
-            className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-700' : 'hover:bg-gray-800'}`,
+            className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`,
             'data-action': 'select-instance', 'data-id': inst.id,
         });
         div.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0` }));
-        div.appendChild(h('span', { className: 'text-sm truncate flex-1', textContent: inst.working_directory.split('/').pop() || inst.working_directory, title: inst.working_directory }));
+        div.appendChild(h('span', { className: 'text-sm truncate flex-1 text-gray-700 dark:text-gray-200', textContent: inst.working_directory.split('/').pop() || inst.working_directory, title: inst.working_directory }));
         if (inst.last_heartbeat_at) {
             const relativeTime = formatRelativeTime(inst.last_heartbeat_at);
             const exactTime = formatTime(inst.last_heartbeat_at);
-            div.appendChild(h('span', { className: 'text-xs text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
+            div.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
         }
         div.appendChild(h('button', {
-            className: 'text-gray-500 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
             'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
         }));
         return div;
@@ -791,7 +840,7 @@
 
     function updateInstanceEl(el, inst) {
         const sel = inst.id === store.selectedInstanceId;
-        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-700' : 'hover:bg-gray-800'}`;
+        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`;
         const dot = el.querySelector('span:first-child');
         if (dot) dot.className = `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0`;
         const children = Array.from(el.children);
@@ -808,7 +857,7 @@
                 hbEl.textContent = relativeTime;
                 hbEl.title = exactTime;
             } else {
-                hbEl = h('span', { className: 'text-xs text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime });
+                hbEl = h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime });
                 if (children[2]) el.insertBefore(hbEl, children[2]);
                 else el.appendChild(hbEl);
             }
@@ -825,7 +874,7 @@
         const list = document.getElementById('session-list');
         if (!list) return;
         const items = Array.from(store.sessions.values());
-        if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-500 py-2">No sessions</p>'; return; }
+        if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 py-2">No sessions</p>'; return; }
         reconcileList(list, items, s => s.id, createSessionEl, updateSessionEl);
     }
 
@@ -834,10 +883,10 @@
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
         const div = h('div', {
-            className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`,
+            className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`,
             'data-action': 'select-session', 'data-id': sess.id, title,
         });
-        div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-600'}` }));
+        div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
         div.appendChild(h('span', { className: 'truncate', textContent: title }));
         return div;
     }
@@ -846,10 +895,10 @@
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
-        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`;
+        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`;
         el.title = title;
         const dot = el.querySelector('span:first-child');
-        if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-600'}`;
+        if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
         const titleEl = el.querySelector('span:last-child');
         if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
     }
@@ -1003,7 +1052,7 @@
             // Handle both marked v12 token objects and older string args
             const t = typeof token === 'string' ? token : (token.text ?? token.raw ?? '');
             // marked v12 already HTML-escapes text, so use directly
-            return `<code class="bg-gray-700 text-gray-200 px-1.5 py-0.5 rounded text-sm">${t}</code>`;
+            return `<code class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm">${t}</code>`;
         };
         marked.setOptions({ renderer, gfm: true, breaks: true });
         markdownReady = true;
@@ -1020,9 +1069,12 @@
     // =========================================================================
     // Init
     // =========================================================================
+    initTheme();
     initMarkdown();
     initResize();
     refreshInstances();
     setInterval(refreshInstances, 5000);
     setInterval(refreshSessions, 5000);
+
+    document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
 })();

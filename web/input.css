@@ -3,21 +3,21 @@
 @tailwind utilities;
 
 @layer components {
-    /* Prose / Markdown styles for dark theme */
+    /* Prose / Markdown styles for light and dark theme */
     .prose {
-        @apply text-gray-200 leading-relaxed;
+        @apply text-gray-800 dark:text-gray-200 leading-relaxed;
     }
     .prose h1 {
-        @apply text-xl font-bold text-gray-100 mt-4 mb-2;
+        @apply text-xl font-bold text-gray-900 dark:text-gray-100 mt-4 mb-2;
     }
     .prose h2 {
-        @apply text-lg font-semibold text-gray-100 mt-4 mb-2;
+        @apply text-lg font-semibold text-gray-900 dark:text-gray-100 mt-4 mb-2;
     }
     .prose h3 {
-        @apply text-base font-semibold text-gray-100 mt-3 mb-1;
+        @apply text-base font-semibold text-gray-900 dark:text-gray-100 mt-3 mb-1;
     }
     .prose h4, .prose h5, .prose h6 {
-        @apply text-sm font-semibold text-gray-200 mt-3 mb-1;
+        @apply text-sm font-semibold text-gray-800 dark:text-gray-200 mt-3 mb-1;
     }
     .prose p {
         @apply my-2;
@@ -29,31 +29,31 @@
         @apply list-decimal list-inside my-2 space-y-1;
     }
     .prose li {
-        @apply text-gray-200;
+        @apply text-gray-700 dark:text-gray-200;
     }
     .prose li > ul, .prose li > ol {
         @apply ml-4 mt-1;
     }
     .prose a {
-        @apply text-blue-400 hover:text-blue-300 underline;
+        @apply text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 underline;
     }
     .prose blockquote {
-        @apply border-l-4 border-gray-600 pl-4 my-2 text-gray-400 italic;
+        @apply border-l-4 border-gray-300 dark:border-gray-600 pl-4 my-2 text-gray-600 dark:text-gray-400 italic;
     }
     .prose table {
         @apply w-full my-2 text-sm;
     }
     .prose thead {
-        @apply border-b border-gray-700;
+        @apply border-b border-gray-200 dark:border-gray-700;
     }
     .prose th {
-        @apply text-left px-3 py-1.5 font-semibold text-gray-300;
+        @apply text-left px-3 py-1.5 font-semibold text-gray-700 dark:text-gray-300;
     }
     .prose td {
-        @apply px-3 py-1.5 border-b border-gray-800;
+        @apply px-3 py-1.5 border-b border-gray-100 dark:border-gray-800;
     }
     .prose code:not(pre code) {
-        @apply bg-gray-800 text-gray-200 px-1.5 py-0.5 rounded text-sm;
+        @apply bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm;
     }
     .prose pre {
         @apply my-3 rounded-lg overflow-x-auto;
@@ -62,16 +62,16 @@
         @apply block p-4 text-sm leading-relaxed;
     }
     .prose hr {
-        @apply border-gray-700 my-4;
+        @apply border-gray-200 dark:border-gray-700 my-4;
     }
     .prose img {
         @apply max-w-full rounded my-2;
     }
     .prose strong {
-        @apply font-semibold text-gray-100;
+        @apply font-semibold text-gray-900 dark:text-gray-100;
     }
     .prose em {
-        @apply italic text-gray-300;
+        @apply italic text-gray-700 dark:text-gray-300;
     }
 }
 
@@ -84,15 +84,26 @@
     background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(75, 85, 99, 0.5);
+    background: rgba(75, 85, 99, 0.3);
     border-radius: 3px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(75, 85, 99, 0.5);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(75, 85, 99, 0.5);
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(107, 114, 128, 0.7);
 }
 
 /* Firefox scrollbar */
 .custom-scrollbar {
     scrollbar-width: thin;
+    scrollbar-color: rgba(75, 85, 99, 0.3) transparent;
+}
+
+.dark .custom-scrollbar {
     scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
 }
