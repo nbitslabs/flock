@@ -48,9 +48,14 @@ func Load(configPath string) *Config {
 	}
 	if v := os.Getenv("FLOCK_DATA_DIR"); v != "" {
 		cfg.DataDir = v
+		cfg.Agent.DataDir = v
 	}
 	if os.Getenv("FLOCK_AGENT_ENABLED") == "true" {
 		cfg.Agent.Enabled = true
+	}
+
+	if cfg.Agent.DataDir == "" {
+		cfg.Agent.DataDir = cfg.DataDir
 	}
 
 	return cfg

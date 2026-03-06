@@ -57,7 +57,7 @@ func main() {
 	broker := server.NewSSEBroker()
 
 	// Create agent harness
-	harness := agent.NewHarness(client, queries, cfg.Agent, broker.SubscribeInternal)
+	harness := agent.NewHarness(client, queries, cfg.Agent, broker.SubscribeInternal, cfg.Agent.DataDir)
 	harness.Start()
 
 	// Create instance manager with shared client
