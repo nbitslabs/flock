@@ -116,7 +116,57 @@
     }
 
     // =========================================================================
-    // Section 3 — API
+    // Section 3 — URL State
+    // =========================================================================
+
+    function updateURL() {
+        if (store.selectedSessionId) {
+            window.location.hash = `i/${encodeURIComponent(store.selectedInstanceId)}/s/${encodeURIComponent(store.selectedSessionId)}`;
+        } else if (store.selectedInstanceId) {
+            window.location.hash = `i/${encodeURIComponent(store.selectedInstanceId)}`;
+        } else {
+            window.location.hash = '';
+        }
+    }
+
+    function parseURL() {
+        const hash = window.location.hash.slice(1);
+        if (!hash) return { instanceId: null, sessionId: null };
+        
+        const parts = hash.split('/');
+        if (parts[0] === 'i' && parts[1]) {
+            const instanceId = decodeURIComponent(parts[1]);
+            if (parts[2] === 's' && parts[3]) {
+                const sessionId = decodeURIComponent(parts[3]);
+                return { instanceId, sessionId };
+            }
+            return { instanceId, sessionId: null };
+        }
+        return { instanceId: null, sessionId: null };
+    }
+
+    async function restoreFromURL() {
+        const { instanceId, sessionId } = parseURL();
+        if (!instanceId) return;
+
+        await refreshInstances();
+        if (!store.instances.has(instanceId)) return;
+
+        store.selectedInstanceId = instanceId;
+        renderInstances();
+        updateHeader();
+        document.getElementById('btn-new-session').classList.remove('hidden');
+        document.getElementById('input-area').classList.add('hidden');
+
+        await loadSessions(instanceId);
+
+        if (sessionId && store.sessions.has(sessionId)) {
+            await selectSession(sessionId);
+        }
+    }
+
+    // =========================================================================
+    // Section 4 — API
     // =========================================================================
 
     async function api(method, path, body) {
@@ -158,6 +208,7 @@
             store.streamingParts.clear();
             closeEventSource();
             renderSessions(); renderMessages(); updateHeader();
+            updateURL();
         }
         store._instanceHash = '';
         await refreshInstances();
@@ -939,6 +990,7 @@
         document.getElementById('btn-new-session').classList.remove('hidden');
         document.getElementById('input-area').classList.add('hidden');
         loadSessions(id);
+        updateURL();
     }
 
     function selectSession(id) {
@@ -950,6 +1002,7 @@
         document.getElementById('input-area').classList.remove('hidden');
         loadMessages(id);
         connectSSE(id);
+        updateURL();
     }
 
     function updateHeader() {
@@ -1074,6 +1127,7 @@
     initMarkdown();
     initResize();
     refreshInstances();
+    restoreFromURL();
     setInterval(refreshInstances, 5000);
     setInterval(refreshSessions, 5000);
 
