@@ -9,6 +9,34 @@ import (
 	"context"
 )
 
+const createFlockAgentSession = `-- name: CreateFlockAgentSession :one
+
+INSERT INTO flock_agent_sessions (id, session_id, working_directory, status)
+VALUES (?, ?, ?, 'active')
+RETURNING id, session_id, working_directory, status, created_at, updated_at
+`
+
+type CreateFlockAgentSessionParams struct {
+	ID               string
+	SessionID        string
+	WorkingDirectory string
+}
+
+// Flock agent session queries
+func (q *Queries) CreateFlockAgentSession(ctx context.Context, arg CreateFlockAgentSessionParams) (FlockAgentSession, error) {
+	row := q.db.QueryRowContext(ctx, createFlockAgentSession, arg.ID, arg.SessionID, arg.WorkingDirectory)
+	var i FlockAgentSession
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.WorkingDirectory,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (id, pid, port, working_directory, status)
 VALUES (?, 0, 0, ?, 'running')
@@ -181,6 +209,24 @@ func (q *Queries) DeleteTasksByInstance(ctx context.Context, instanceID string) 
 	return err
 }
 
+const getActiveFlockAgentSession = `-- name: GetActiveFlockAgentSession :one
+SELECT id, session_id, working_directory, status, created_at, updated_at FROM flock_agent_sessions WHERE status = 'active' LIMIT 1
+`
+
+func (q *Queries) GetActiveFlockAgentSession(ctx context.Context) (FlockAgentSession, error) {
+	row := q.db.QueryRowContext(ctx, getActiveFlockAgentSession)
+	var i FlockAgentSession
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.WorkingDirectory,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getActiveOrchestratorSession = `-- name: GetActiveOrchestratorSession :one
 SELECT id, instance_id, session_id, heartbeat_count, status, created_at, updated_at, last_heartbeat_at FROM orchestrator_sessions
 WHERE instance_id = ? AND status = 'active'
@@ -199,6 +245,24 @@ func (q *Queries) GetActiveOrchestratorSession(ctx context.Context, instanceID s
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastHeartbeatAt,
+	)
+	return i, err
+}
+
+const getFlockAgentSession = `-- name: GetFlockAgentSession :one
+SELECT id, session_id, working_directory, status, created_at, updated_at FROM flock_agent_sessions WHERE id = ?
+`
+
+func (q *Queries) GetFlockAgentSession(ctx context.Context, id string) (FlockAgentSession, error) {
+	row := q.db.QueryRowContext(ctx, getFlockAgentSession, id)
+	var i FlockAgentSession
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.WorkingDirectory,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -514,6 +578,15 @@ func (q *Queries) ListTasksByInstance(ctx context.Context, instanceID string) ([
 	return items, nil
 }
 
+const retireFlockAgentSession = `-- name: RetireFlockAgentSession :exec
+UPDATE flock_agent_sessions SET status = 'retired', updated_at = datetime('now') WHERE id = ?
+`
+
+func (q *Queries) RetireFlockAgentSession(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, retireFlockAgentSession, id)
+	return err
+}
+
 const retireOrchestratorSession = `-- name: RetireOrchestratorSession :exec
 UPDATE orchestrator_sessions
 SET status = 'retired', updated_at = datetime('now')
@@ -522,6 +595,21 @@ WHERE id = ?
 
 func (q *Queries) RetireOrchestratorSession(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, retireOrchestratorSession, id)
+	return err
+}
+
+const updateFlockAgentSession = `-- name: UpdateFlockAgentSession :exec
+UPDATE flock_agent_sessions SET session_id = ?, status = ?, updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateFlockAgentSessionParams struct {
+	SessionID string
+	Status    string
+	ID        string
+}
+
+func (q *Queries) UpdateFlockAgentSession(ctx context.Context, arg UpdateFlockAgentSessionParams) error {
+	_, err := q.db.ExecContext(ctx, updateFlockAgentSession, arg.SessionID, arg.Status, arg.ID)
 	return err
 }
 

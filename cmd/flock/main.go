@@ -89,8 +89,8 @@ func main() {
 	// Start global event subscription to the OpenCode server
 	manager.StartEventSubscription()
 
-	// Create HTTP server
-	srv := server.New(queries, manager, broker, harness, cfg.DataDir)
+	// Create HTTP server (reuse same client for flock agent - it uses the data dir as working dir)
+	srv := server.New(queries, manager, broker, harness, cfg.DataDir, client)
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: srv,

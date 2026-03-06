@@ -13,23 +13,25 @@ import (
 )
 
 type Server struct {
-	mux     *http.ServeMux
-	queries *sqlc.Queries
-	manager *opencode.Manager
-	broker  *SSEBroker
-	harness *agent.Harness
-	dataDir string
-	tmpl    *template.Template
+	mux                *http.ServeMux
+	queries            *sqlc.Queries
+	manager            *opencode.Manager
+	broker             *SSEBroker
+	harness            *agent.Harness
+	dataDir            string
+	tmpl               *template.Template
+	flockAgentClient   *opencode.Client
 }
 
-func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir string) *Server {
+func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir string, flockAgentClient *opencode.Client) *Server {
 	s := &Server{
-		mux:     http.NewServeMux(),
-		queries: queries,
-		manager: manager,
-		broker:  broker,
-		harness: harness,
-		dataDir: dataDir,
+		mux:              http.NewServeMux(),
+		queries:          queries,
+		manager:          manager,
+		broker:           broker,
+		harness:          harness,
+		dataDir:          dataDir,
+		flockAgentClient: flockAgentClient,
 	}
 	s.setupRoutes()
 	return s
@@ -75,6 +77,14 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/global-memory", s.handleGetGlobalMemory)
 	s.mux.HandleFunc("PUT /api/global-memory", s.handlePutGlobalMemory)
 	s.mux.HandleFunc("GET /api/agent/status", s.handleGetAgentStatus)
+
+	// Flock Agent API
+	s.mux.HandleFunc("GET /api/flock-agent", s.handleGetFlockAgentSession)
+	s.mux.HandleFunc("POST /api/flock-agent", s.handleCreateFlockAgentSession)
+	s.mux.HandleFunc("PUT /api/flock-agent/rotate", s.handleRotateFlockAgentSession)
+	s.mux.HandleFunc("GET /api/flock-agent/messages", s.handleGetFlockAgentMessages)
+	s.mux.HandleFunc("POST /api/flock-agent/messages", s.handleSendFlockAgentMessage)
+	s.mux.HandleFunc("GET /api/flock-agent/events", s.handleFlockAgentEvents)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {

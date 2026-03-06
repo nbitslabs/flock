@@ -17,6 +17,30 @@
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Agent Orchestration</p>
         </div>
 
+        <!-- Flock Agent -->
+        <div class="p-3 border-b border-gray-200 dark:border-gray-800">
+            <div class="flex items-center justify-between mb-2">
+                <h2 class="text-sm font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider">Flock</h2>
+                <div class="flex items-center gap-2">
+                    <button id="btn-flock-agent-rotate" class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 hidden" title="Rotate session">
+                        ↻
+                    </button>
+                    <button id="btn-new-flock-agent" class="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded">
+                        + New
+                    </button>
+                </div>
+            </div>
+            <div id="flock-agent" class="hidden">
+                <div class="flex items-center gap-2 px-2 py-1.5 rounded bg-purple-100 dark:bg-purple-900/30 cursor-pointer" data-action="select-flock-agent">
+                    <span class="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0"></span>
+                    <span class="text-sm truncate text-purple-700 dark:text-purple-300">Flock Agent</span>
+                </div>
+            </div>
+            <div id="flock-agent-empty" class="text-xs text-gray-400 dark:text-gray-500 px-2 py-1">
+                No agent session
+            </div>
+        </div>
+
         <!-- Instances -->
         <div class="flex-1 overflow-y-auto custom-scrollbar">
             <div class="p-3">

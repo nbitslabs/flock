@@ -12,6 +12,9 @@
         messages: new Map(),       // msgID -> message
         streamingParts: new Map(), // partID -> accumulated part
 
+        flockAgentActive: false,
+        flockAgentId: null,
+        flockAgentSessionId: null,
         selectedInstanceId: null,
         selectedSessionId: null,
         sessionBusy: false,
@@ -21,6 +24,7 @@
         _lastSentText: null,  // track user message to filter streaming echoes
         _sessionHash: '',
         _darkMode: true,
+        _flockAgentHash: '',
     };
 
     // =========================================================================
@@ -298,6 +302,71 @@
         }
     }
 
+    // Flock Agent API
+    async function refreshFlockAgent() {
+        try {
+            const data = await api('GET', '/api/flock-agent') || {};
+            const hash = JSON.stringify([data.active, data.id, data.status]);
+            if (hash === store._flockAgentHash) return;
+            store._flockAgentHash = hash;
+            store.flockAgentActive = data.active;
+            store.flockAgentId = data.id;
+            store.flockAgentSessionId = data.session_id;
+            renderFlockAgent();
+        } catch (e) { console.error('refreshFlockAgent:', e); }
+    }
+
+    async function createFlockAgent() {
+        try {
+            await api('POST', '/api/flock-agent');
+            store._flockAgentHash = '';
+            await refreshFlockAgent();
+        } catch (e) { alert('Failed to create flock agent: ' + e.message); }
+    }
+
+    async function rotateFlockAgent() {
+        try {
+            await api('PUT', '/api/flock-agent/rotate');
+            store._flockAgentHash = '';
+            await refreshFlockAgent();
+        } catch (e) { alert('Failed to rotate flock agent: ' + e.message); }
+    }
+
+    async function loadFlockAgentMessages() {
+        try {
+            const msgs = await api('GET', '/api/flock-agent/messages') || [];
+            store.messages.clear();
+            for (const m of msgs) {
+                if (!m.info?.id) continue;
+                store.messages.set(m.info.id, m);
+            }
+            store.streamingParts.clear();
+            store._lastSentText = null;
+            renderMessages();
+        } catch (e) { console.error('loadFlockAgentMessages:', e); }
+    }
+
+    async function sendFlockAgentMessage(content) {
+        try {
+            await api('POST', '/api/flock-agent/messages', { content });
+        } catch (e) {
+            console.error('sendFlockAgentMessage:', e);
+            alert('Failed to send message: ' + e.message);
+            store.sessionBusy = false;
+            updateInputState();
+        }
+    }
+
+    function connectFlockAgentSSE() {
+        closeEventSource();
+        const es = new EventSource('/api/flock-agent/events');
+        store.eventSource = es;
+        es.onmessage = function (e) {
+            try { routeEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ }
+        };
+        es.onerror = function () { /* auto-reconnects */ };
+    }
+
     // =========================================================================
     // Section 4 — SSE
     // =========================================================================
@@ -433,7 +502,25 @@
     function doSend() {
         const input = document.getElementById('message-input');
         const content = input.value.trim();
-        if (!content || !store.selectedSessionId || store.sessionBusy) return;
+        if (!content || store.sessionBusy) return;
+        if (store.flockAgentActive) {
+            input.value = '';
+            input.style.height = 'auto';
+            store._lastSentText = content;
+            const optId = '_opt_' + Date.now();
+            store.messages.set(optId, {
+                info: { id: optId, role: 'user', time: { created: Date.now() } },
+                parts: [{ type: 'text', text: content }],
+                _optimistic: true,
+            });
+            renderMessages();
+            scrollToBottom();
+            store.sessionBusy = true;
+            updateInputState();
+            sendFlockAgentMessage(content);
+            return;
+        }
+        if (!store.selectedSessionId) return;
         input.value = '';
         input.style.height = 'auto';
 
@@ -956,6 +1043,29 @@
     }
 
     // =========================================================================
+    // Section 8b — Flock Agent UI
+    // =========================================================================
+
+    function renderFlockAgent() {
+        const flockAgent = document.getElementById('flock-agent');
+        const flockAgentEmpty = document.getElementById('flock-agent-empty');
+        const btnRotate = document.getElementById('btn-flock-agent-rotate');
+        const btnNew = document.getElementById('btn-new-flock-agent');
+        if (!flockAgent || !flockAgentEmpty || !btnRotate || !btnNew) return;
+        if (store.flockAgentActive) {
+            flockAgent.classList.remove('hidden');
+            flockAgentEmpty.classList.add('hidden');
+            btnRotate.classList.remove('hidden');
+            btnNew.classList.add('hidden');
+        } else {
+            flockAgent.classList.add('hidden');
+            flockAgentEmpty.classList.remove('hidden');
+            btnRotate.classList.add('hidden');
+            btnNew.classList.remove('hidden');
+        }
+    }
+
+    // =========================================================================
     // Section 9 — Resize
     // =========================================================================
 
@@ -991,6 +1101,20 @@
         document.getElementById('input-area').classList.add('hidden');
         loadSessions(id);
         updateURL();
+    }
+
+    function selectFlockAgent() {
+        store.selectedInstanceId = null;
+        store.selectedSessionId = null;
+        store.sessions.clear(); store.messages.clear(); store.streamingParts.clear();
+        store.sessionBusy = false; store.sessionBusyTool = null;
+        closeEventSource();
+        renderInstances(); renderSessions(); renderMessages();
+        document.getElementById('btn-new-session').classList.add('hidden');
+        document.getElementById('input-area').classList.remove('hidden');
+        document.getElementById('main-header').textContent = 'Flock Agent';
+        loadFlockAgentMessages();
+        connectFlockAgentSSE();
     }
 
     function selectSession(id) {
@@ -1051,6 +1175,7 @@
             case 'select-instance': selectInstance(t.dataset.id); break;
             case 'delete-instance': e.stopPropagation(); if (confirm('Remove this instance?')) deleteInstance(t.dataset.id); break;
             case 'select-session': selectSession(t.dataset.id); break;
+            case 'select-flock-agent': selectFlockAgent(); break;
         }
     });
 
@@ -1071,6 +1196,12 @@
     });
     document.getElementById('btn-new-session').addEventListener('click', () => {
         if (store.selectedInstanceId) createSession(store.selectedInstanceId);
+    });
+    document.getElementById('btn-new-flock-agent').addEventListener('click', () => {
+        createFlockAgent();
+    });
+    document.getElementById('btn-flock-agent-rotate').addEventListener('click', () => {
+        if (confirm('Rotate session? This will start a new conversation.')) rotateFlockAgent();
     });
     document.getElementById('message-input').addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
@@ -1127,9 +1258,11 @@
     initMarkdown();
     initResize();
     refreshInstances();
+    refreshFlockAgent();
     restoreFromURL();
     setInterval(refreshInstances, 5000);
     setInterval(refreshSessions, 5000);
+    setInterval(refreshFlockAgent, 5000);
 
     document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
 })();

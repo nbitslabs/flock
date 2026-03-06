@@ -108,3 +108,22 @@ SELECT last_heartbeat_at FROM orchestrator_sessions
 WHERE instance_id = ? AND status = 'active'
 ORDER BY last_heartbeat_at DESC
 LIMIT 1;
+
+-- Flock agent session queries
+
+-- name: CreateFlockAgentSession :one
+INSERT INTO flock_agent_sessions (id, session_id, working_directory, status)
+VALUES (?, ?, ?, 'active')
+RETURNING *;
+
+-- name: GetFlockAgentSession :one
+SELECT * FROM flock_agent_sessions WHERE id = ?;
+
+-- name: GetActiveFlockAgentSession :one
+SELECT * FROM flock_agent_sessions WHERE status = 'active' LIMIT 1;
+
+-- name: UpdateFlockAgentSession :exec
+UPDATE flock_agent_sessions SET session_id = ?, status = ?, updated_at = datetime('now') WHERE id = ?;
+
+-- name: RetireFlockAgentSession :exec
+UPDATE flock_agent_sessions SET status = 'retired', updated_at = datetime('now') WHERE id = ?;
