@@ -92,7 +92,7 @@ LIMIT 1;
 
 -- name: IncrementHeartbeatCount :exec
 UPDATE orchestrator_sessions
-SET heartbeat_count = heartbeat_count + 1, last_heartbeat_at = datetime('now'), updated_at = datetime('now')
+SET heartbeat_count = heartbeat_count + 1, last_heartbeat_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
 WHERE id = ?;
 
 -- name: RetireOrchestratorSession :exec
