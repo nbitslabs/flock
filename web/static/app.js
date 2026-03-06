@@ -434,9 +434,10 @@
     /** Normalize timestamp to milliseconds (handles both seconds, milliseconds, and ISO date strings) */
     function normalizeTs(t) {
         if (!t) return 0;
-        // Handle ISO date strings from SQLite
+        // Handle ISO date strings from SQLite (stored as UTC)
         if (typeof t === 'string') {
-            const d = new Date(t);
+            const iso = t.includes('Z') ? t : t + 'Z';
+            const d = new Date(iso);
             if (!isNaN(d.getTime())) return d.getTime();
             return 0;
         }
