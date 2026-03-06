@@ -23,7 +23,7 @@ type Harness struct {
 	cancel     context.CancelFunc
 	// subscribeFn is set by the caller to provide internal SSE subscriptions.
 	subscribeFn func(sessionID string) (<-chan string, func())
-	dataDir    string
+	dataDir     string
 }
 
 // NewHarness creates a new agent harness.
@@ -42,7 +42,7 @@ func NewHarness(
 		queries:     queries,
 		cfg:         cfg,
 		subscribeFn: subscribeFn,
-		dataDir:    dataDir,
+		dataDir:     dataDir,
 	}
 }
 
