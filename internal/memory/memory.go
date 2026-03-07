@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -185,4 +187,42 @@ func ClearDecisionFiles(workingDir string) {
 	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", newTasksFile))
 	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", restartFile))
 	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", completedFile))
+}
+
+// TemplateHash returns the SHA256 hash of the embedded heartbeat template.
+func TemplateHash() string {
+	hash := sha256.Sum256([]byte(defaultHeartbeat()))
+	return hex.EncodeToString(hash[:])
+}
+
+// HeartbeatUpgradePrompt returns a prompt for OpenCode to merge the existing
+// heartbeat with the new template.
+func HeartbeatUpgradePrompt(workingDir string) (string, error) {
+	existingHeartbeat, err := ReadHeartbeat(workingDir)
+	if err != nil {
+		return "", fmt.Errorf("read existing heartbeat: %w", err)
+	}
+
+	newHeartbeat := defaultHeartbeat()
+
+	prompt := fmt.Sprintf(`The heartbeat template has been updated. Your task is to merge the existing heartbeat file with the new template, preserving any custom modifications while incorporating new changes.
+
+## Existing Heartbeat (preserve custom modifications):
+%s
+
+## New Heartbeat Template (incorporate new changes):
+%s
+
+## Instructions:
+1. Compare the existing heartbeat with the new template
+2. Identify any custom modifications made by the user in the existing file
+3. Merge them by:
+   - Incorporating all new sections/instructions from the template
+   - Preserving any user customizations that add value
+   - Removing any instructions that are no longer relevant
+4. Write the merged result to: %s
+
+Only write the merged content to the file. Do not add any other files.`, existingHeartbeat, newHeartbeat, filepath.Join(ResolveStateDir(workingDir), heartbeatFile))
+
+	return prompt, nil
 }

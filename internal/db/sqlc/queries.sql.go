@@ -40,7 +40,7 @@ func (q *Queries) CreateFlockAgentSession(ctx context.Context, arg CreateFlockAg
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (id, pid, port, working_directory, status)
 VALUES (?, 0, 0, ?, 'running')
-RETURNING id, pid, port, working_directory, status, created_at, updated_at
+RETURNING id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash
 `
 
 type CreateInstanceParams struct {
@@ -59,6 +59,7 @@ func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) 
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HeartbeatHash,
 	)
 	return i, err
 }
@@ -268,7 +269,7 @@ func (q *Queries) GetFlockAgentSession(ctx context.Context, id string) (FlockAge
 }
 
 const getInstance = `-- name: GetInstance :one
-SELECT id, pid, port, working_directory, status, created_at, updated_at FROM instances WHERE id = ?
+SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash FROM instances WHERE id = ?
 `
 
 func (q *Queries) GetInstance(ctx context.Context, id string) (Instance, error) {
@@ -282,8 +283,20 @@ func (q *Queries) GetInstance(ctx context.Context, id string) (Instance, error) 
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HeartbeatHash,
 	)
 	return i, err
+}
+
+const getInstanceHeartbeatHash = `-- name: GetInstanceHeartbeatHash :one
+SELECT heartbeat_hash FROM instances WHERE id = ?
+`
+
+func (q *Queries) GetInstanceHeartbeatHash(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getInstanceHeartbeatHash, id)
+	var heartbeat_hash string
+	err := row.Scan(&heartbeat_hash)
+	return heartbeat_hash, err
 }
 
 const getLastHeartbeatByInstance = `-- name: GetLastHeartbeatByInstance :one
@@ -423,7 +436,7 @@ func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Tas
 }
 
 const listInstances = `-- name: ListInstances :many
-SELECT id, pid, port, working_directory, status, created_at, updated_at FROM instances ORDER BY created_at DESC
+SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash FROM instances ORDER BY created_at DESC
 `
 
 func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
@@ -443,6 +456,7 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HeartbeatHash,
 		); err != nil {
 			return nil, err
 		}
@@ -610,6 +624,20 @@ type UpdateFlockAgentSessionParams struct {
 
 func (q *Queries) UpdateFlockAgentSession(ctx context.Context, arg UpdateFlockAgentSessionParams) error {
 	_, err := q.db.ExecContext(ctx, updateFlockAgentSession, arg.SessionID, arg.Status, arg.ID)
+	return err
+}
+
+const updateInstanceHeartbeatHash = `-- name: UpdateInstanceHeartbeatHash :exec
+UPDATE instances SET heartbeat_hash = ?, updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateInstanceHeartbeatHashParams struct {
+	HeartbeatHash string
+	ID            string
+}
+
+func (q *Queries) UpdateInstanceHeartbeatHash(ctx context.Context, arg UpdateInstanceHeartbeatHashParams) error {
+	_, err := q.db.ExecContext(ctx, updateInstanceHeartbeatHash, arg.HeartbeatHash, arg.ID)
 	return err
 }
 
