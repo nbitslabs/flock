@@ -217,7 +217,7 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error 
 		return fmt.Errorf("generate upgrade prompt: %w", err)
 	}
 
-	session, err := h.client.CreateSession(ctx)
+	session, err := h.client.CreateSession(ctx, workingDir)
 	if err != nil {
 		return fmt.Errorf("create upgrade session: %w", err)
 	}
@@ -237,6 +237,9 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	pollTicker := time.NewTicker(3 * time.Second)
+	defer pollTicker.Stop()
+
 	for {
 		select {
 		case raw, ok := <-ch:
@@ -249,6 +252,20 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error 
 				Type string `json:"type"`
 			}
 			if json.Unmarshal([]byte(data), &env) == nil && env.Type == "session.idle" {
+				log.Printf("agent: heartbeat upgrade completed for instance %s", truncID(instanceID))
+				h.queries.UpdateInstanceHeartbeatHash(ctx, sqlc.UpdateInstanceHeartbeatHashParams{
+					HeartbeatHash: currentHash,
+					ID:            instanceID,
+				})
+				return nil
+			}
+		case <-pollTicker.C:
+			idle, err := h.client.IsSessionIdle(ctx, session.ID)
+			if err != nil {
+				log.Printf("agent: poll session status failed: %v", err)
+				continue
+			}
+			if idle {
 				log.Printf("agent: heartbeat upgrade completed for instance %s", truncID(instanceID))
 				h.queries.UpdateInstanceHeartbeatHash(ctx, sqlc.UpdateInstanceHeartbeatHashParams{
 					HeartbeatHash: currentHash,

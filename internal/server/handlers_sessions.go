@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
+	"github.com/nbitslabs/flock/internal/opencode"
 )
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
@@ -20,10 +21,43 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	// Try to get sessions from OpenCode
 	inst, ok := s.manager.Get(instanceID)
 	if ok && inst.Client != nil {
-		sessions, err := inst.Client.ListSessions(r.Context())
+		sessions, err := inst.Client.ListSessions(r.Context(), inst.WorkingDirectory)
 		if err == nil {
-			// Sync sessions into flock's DB so other handlers can look them up
+			// Build set of session IDs in this directory
+			ownIDs := make(map[string]struct{}, len(sessions))
 			for _, sess := range sessions {
+				ownIDs[sess.ID] = struct{}{}
+			}
+
+			// Filter out sessions whose parent belongs to a different instance
+			// (e.g. sub-agent sessions created in flock's dir by an MCP session)
+			var result []opencode.Session
+			for _, sess := range sessions {
+				if sess.ParentID != "" {
+					if _, parentIsOurs := ownIDs[sess.ParentID]; !parentIsOurs {
+						continue
+					}
+				}
+				result = append(result, sess)
+			}
+
+			// Include children of our sessions that live in other directories
+			// (e.g. @flock-commit-writer sessions spawned by our sub-agent)
+			// Snapshot length to avoid iterating over appended children.
+			n := len(result)
+			for i := 0; i < n; i++ {
+				children, err := inst.Client.ListSessionChildren(r.Context(), result[i].ID)
+				if err != nil {
+					continue
+				}
+				for _, child := range children {
+					if child.Directory != inst.WorkingDirectory {
+						result = append(result, child)
+					}
+				}
+			}
+
+			for _, sess := range result {
 				s.queries.UpsertSession(r.Context(), sqlc.UpsertSessionParams{
 					ID:         sess.ID,
 					InstanceID: instanceID,
@@ -31,7 +65,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 					Status:     "active",
 				})
 			}
-			writeJSON(w, sessions)
+			writeJSON(w, result)
 			return
 		}
 		log.Printf("failed to list sessions from opencode: %v, falling back to DB", err)
@@ -54,7 +88,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ocSession, err := inst.Client.CreateSession(r.Context())
+	ocSession, err := inst.Client.CreateSession(r.Context(), inst.WorkingDirectory)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

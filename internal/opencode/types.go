@@ -14,6 +14,7 @@ type Session struct {
 	Slug      string      `json:"slug,omitempty"`
 	Title     string      `json:"title"`
 	Directory string      `json:"directory,omitempty"`
+	ParentID  string      `json:"parentID,omitempty"`
 	Version   string      `json:"version,omitempty"`
 	ProjectID string      `json:"projectID,omitempty"`
 	Time      SessionTime `json:"time"`

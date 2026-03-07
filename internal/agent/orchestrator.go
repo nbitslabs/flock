@@ -48,6 +48,14 @@ func NewOrchestrator(
 func (o *Orchestrator) EnsureSession(ctx context.Context) (*sqlc.OrchestratorSession, bool, error) {
 	orch, err := o.queries.GetActiveOrchestratorSession(ctx, o.instanceID)
 	if err == nil {
+		// Verify the session still exists in OpenCode
+		if _, err := o.client.GetSession(ctx, orch.SessionID); err != nil {
+			log.Printf("agent: orchestrator session %s no longer exists in opencode, retiring", truncID(orch.SessionID))
+			o.queries.RetireOrchestratorSession(ctx, orch.ID)
+			sess, err := o.createOrchestratorSession(ctx)
+			return sess, true, err
+		}
+
 		// Check if rotation is needed
 		if int(orch.HeartbeatCount) >= o.cfg.MaxHeartbeatsPerSession {
 			log.Printf("agent: rotating orchestrator session (heartbeats=%d)", orch.HeartbeatCount)
@@ -64,7 +72,7 @@ func (o *Orchestrator) EnsureSession(ctx context.Context) (*sqlc.OrchestratorSes
 }
 
 func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.OrchestratorSession, error) {
-	session, err := o.client.CreateSession(ctx)
+	session, err := o.client.CreateSession(ctx, o.workingDir)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator session: %w", err)
 	}
@@ -151,7 +159,14 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 	msg := o.composeHeartbeatMessage(ctx)
 
 	if err := o.client.SendMessage(ctx, orch.SessionID, msg); err != nil {
-		return fmt.Errorf("send heartbeat: %w", err)
+		// Session may have been deleted externally — retire and recreate
+		log.Printf("agent: heartbeat send failed, retiring stale session %s: %v", truncID(orch.SessionID), err)
+		o.queries.RetireOrchestratorSession(ctx, orch.ID)
+		orch, _, err = o.EnsureSession(ctx)
+		if err != nil {
+			return fmt.Errorf("recreate session after send failure: %w", err)
+		}
+		return nil
 	}
 
 	o.queries.IncrementHeartbeatCount(ctx, orch.ID)
@@ -213,18 +228,10 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	return sb.String()
 }
 
-// waitForIdle subscribes to SSE events for the given session and blocks until
-// a session.idle event is received or the timeout is hit.
+// waitForIdle blocks until the session becomes idle. It uses both SSE events
+// (fast path for same-directory sessions) and polling (fallback for sessions
+// in other directories whose events may not appear on the global SSE stream).
 func (o *Orchestrator) waitForIdle(ctx context.Context, sessionID string) error {
-	if o.subscribeFn == nil {
-		// No subscriber available — just wait a fixed time
-		time.Sleep(30 * time.Second)
-		return nil
-	}
-
-	ch, unsub := o.subscribeFn(sessionID)
-	defer unsub()
-
 	timeout := o.cfg.WaitForIdleTimeout
 	if timeout == 0 {
 		timeout = 3 * time.Minute
@@ -233,19 +240,39 @@ func (o *Orchestrator) waitForIdle(ctx context.Context, sessionID string) error 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
+	// Poll ticker as fallback — checks session status every 3 seconds
+	pollTicker := time.NewTicker(3 * time.Second)
+	defer pollTicker.Stop()
+
+	// Also listen for SSE events if available (fast path)
+	var ch <-chan string
+	if o.subscribeFn != nil {
+		var unsub func()
+		ch, unsub = o.subscribeFn(sessionID)
+		defer unsub()
+	}
+
 	for {
 		select {
 		case raw, ok := <-ch:
 			if !ok {
 				return nil
 			}
-			// Parse event type from the SSE data line
 			data := strings.TrimPrefix(raw, "data: ")
 			data = strings.TrimSpace(data)
 			var env struct {
 				Type string `json:"type"`
 			}
 			if json.Unmarshal([]byte(data), &env) == nil && env.Type == "session.idle" {
+				return nil
+			}
+		case <-pollTicker.C:
+			idle, err := o.client.IsSessionIdle(ctx, sessionID)
+			if err != nil {
+				log.Printf("agent: poll session status failed: %v", err)
+				continue
+			}
+			if idle {
 				return nil
 			}
 		case <-timer.C:

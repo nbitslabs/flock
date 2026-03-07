@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -24,8 +25,12 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session", nil)
+func (c *Client) ListSessions(ctx context.Context, directory string) ([]Session, error) {
+	endpoint := c.baseURL + "/session"
+	if directory != "" {
+		endpoint += "?directory=" + url.QueryEscape(directory)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +50,35 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 	return sessions, nil
 }
 
-func (c *Client) CreateSession(ctx context.Context) (*Session, error) {
+// ListSessionChildren returns child sessions of the given parent session.
+func (c *Client) ListSessionChildren(ctx context.Context, sessionID string) ([]Session, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/"+sessionID+"/children", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list session children: status %d: %s", resp.StatusCode, body)
+	}
+	var sessions []Session
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
+func (c *Client) CreateSession(ctx context.Context, directory string) (*Session, error) {
 	body, _ := json.Marshal(CreateSessionRequest{})
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session", bytes.NewReader(body))
+	endpoint := c.baseURL + "/session"
+	if directory != "" {
+		endpoint += "?directory=" + url.QueryEscape(directory)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +97,57 @@ func (c *Client) CreateSession(ctx context.Context) (*Session, error) {
 		return nil, err
 	}
 	return &session, nil
+}
+
+// GetSession retrieves a session by ID. Returns an error if the session does
+// not exist (e.g. was deleted).
+func (c *Client) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/"+sessionID, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get session: status %d: %s", resp.StatusCode, body)
+	}
+	var session Session
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+// IsSessionIdle checks if a session is idle by querying the status endpoint.
+func (c *Client) IsSessionIdle(ctx context.Context, sessionID string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/session/status", nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("session status: status %d", resp.StatusCode)
+	}
+	var statuses map[string]struct {
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&statuses); err != nil {
+		return false, err
+	}
+	st, ok := statuses[sessionID]
+	if !ok {
+		// Session not in status map — treat as idle (may have completed already)
+		return true, nil
+	}
+	return st.Type == "idle", nil
 }
 
 func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, error) {

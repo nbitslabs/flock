@@ -21,7 +21,7 @@ func CreateSubAgentSession(
 	workingDir string,
 	task *sqlc.Task,
 ) error {
-	session, err := client.CreateSession(ctx)
+	session, err := client.CreateSession(ctx, workingDir)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -145,7 +145,7 @@ func RestartSubAgent(
 	// Read existing progress if any
 	progressContent, _ := memory.ReadInstanceMemory(workingDir)
 
-	session, err := client.CreateSession(ctx)
+	session, err := client.CreateSession(ctx, workingDir)
 	if err != nil {
 		return fmt.Errorf("create restart session: %w", err)
 	}

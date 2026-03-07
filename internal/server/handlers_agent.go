@@ -178,7 +178,7 @@ func (s *Server) handleCreateFlockAgentSession(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	ocSession, err := s.flockAgentClient.CreateSession(r.Context())
+	ocSession, err := s.flockAgentClient.CreateSession(r.Context(), s.dataDir)
 	if err != nil {
 		log.Printf("failed to create flock agent session: %v", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
@@ -216,7 +216,7 @@ func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Re
 		s.queries.RetireFlockAgentSession(r.Context(), activeSession.ID)
 	}
 
-	ocSession, err := s.flockAgentClient.CreateSession(r.Context())
+	ocSession, err := s.flockAgentClient.CreateSession(r.Context(), s.dataDir)
 	if err != nil {
 		log.Printf("failed to create flock agent session: %v", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
