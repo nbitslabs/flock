@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -17,6 +18,16 @@ const (
 	restartFile   = "restart_tasks.json"
 	completedFile = "completed_tasks.json"
 )
+
+// ResolveStateDir returns the state directory path.
+// If the given path already ends with ".flock", it is returned as-is.
+// Otherwise, ".flock" is appended to the path.
+func ResolveStateDir(dataDir string) string {
+	if strings.HasSuffix(dataDir, flockDir) {
+		return dataDir
+	}
+	return filepath.Join(dataDir, flockDir)
+}
 
 // NewTaskDecision represents a new task from the orchestrator's decision file.
 type NewTaskDecision struct {
@@ -40,11 +51,13 @@ type CompletedTaskDecision struct {
 
 // EnsureLayout creates the .flock directory structure and default files if they
 // don't already exist. workingDir is the instance's working directory.
+// It detects if workingDir already ends with ".flock" to avoid nesting.
 func EnsureLayout(workingDir string) error {
+	stateDir := ResolveStateDir(workingDir)
 	dirs := []string{
-		filepath.Join(workingDir, flockDir),
-		filepath.Join(workingDir, memoryDir),
-		filepath.Join(workingDir, progressDir),
+		stateDir,
+		filepath.Join(stateDir, "memory"),
+		filepath.Join(stateDir, "memory", "progress"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -53,7 +66,7 @@ func EnsureLayout(workingDir string) error {
 	}
 
 	// Write default HEARTBEAT.md if missing
-	hbPath := filepath.Join(workingDir, flockDir, heartbeatFile)
+	hbPath := filepath.Join(stateDir, heartbeatFile)
 	if _, err := os.Stat(hbPath); os.IsNotExist(err) {
 		if err := os.WriteFile(hbPath, []byte(defaultHeartbeat()), 0o644); err != nil {
 			return fmt.Errorf("write heartbeat: %w", err)
@@ -61,7 +74,7 @@ func EnsureLayout(workingDir string) error {
 	}
 
 	// Write default MEMORY.md if missing
-	memPath := filepath.Join(workingDir, memoryDir, memoryFile)
+	memPath := filepath.Join(stateDir, "memory", memoryFile)
 	if _, err := os.Stat(memPath); os.IsNotExist(err) {
 		if err := os.WriteFile(memPath, []byte(defaultMemory()), 0o644); err != nil {
 			return fmt.Errorf("write memory: %w", err)
@@ -73,7 +86,7 @@ func EnsureLayout(workingDir string) error {
 
 // ReadHeartbeat returns the contents of .flock/HEARTBEAT.md.
 func ReadHeartbeat(workingDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(workingDir, flockDir, heartbeatFile))
+	data, err := os.ReadFile(filepath.Join(ResolveStateDir(workingDir), heartbeatFile))
 	if err != nil {
 		return "", err
 	}
@@ -82,12 +95,12 @@ func ReadHeartbeat(workingDir string) (string, error) {
 
 // WriteHeartbeat writes content to .flock/HEARTBEAT.md.
 func WriteHeartbeat(workingDir, content string) error {
-	return os.WriteFile(filepath.Join(workingDir, flockDir, heartbeatFile), []byte(content), 0o644)
+	return os.WriteFile(filepath.Join(ResolveStateDir(workingDir), heartbeatFile), []byte(content), 0o644)
 }
 
 // ReadInstanceMemory returns the contents of .flock/memory/MEMORY.md.
 func ReadInstanceMemory(workingDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(workingDir, memoryDir, memoryFile))
+	data, err := os.ReadFile(filepath.Join(ResolveStateDir(workingDir), "memory", memoryFile))
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +109,7 @@ func ReadInstanceMemory(workingDir string) (string, error) {
 
 // ReadGlobalMemory returns the global memory file from the data directory.
 func ReadGlobalMemory(dataDir string) (string, error) {
-	path := filepath.Join(dataDir, "memory", memoryFile)
+	path := filepath.Join(ResolveStateDir(dataDir), "memory", memoryFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -109,7 +122,7 @@ func ReadGlobalMemory(dataDir string) (string, error) {
 
 // WriteGlobalMemory writes the global memory file in the data directory.
 func WriteGlobalMemory(dataDir, content string) error {
-	dir := filepath.Join(dataDir, "memory")
+	dir := filepath.Join(ResolveStateDir(dataDir), "memory")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -118,7 +131,7 @@ func WriteGlobalMemory(dataDir, content string) error {
 
 // ReadNewTasks reads and parses .flock/memory/new_tasks.json.
 func ReadNewTasks(workingDir string) ([]NewTaskDecision, error) {
-	path := filepath.Join(workingDir, memoryDir, newTasksFile)
+	path := filepath.Join(ResolveStateDir(workingDir), "memory", newTasksFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -135,7 +148,7 @@ func ReadNewTasks(workingDir string) ([]NewTaskDecision, error) {
 
 // ReadRestartTasks reads and parses .flock/memory/restart_tasks.json.
 func ReadRestartTasks(workingDir string) ([]RestartTaskDecision, error) {
-	path := filepath.Join(workingDir, memoryDir, restartFile)
+	path := filepath.Join(ResolveStateDir(workingDir), "memory", restartFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -152,7 +165,7 @@ func ReadRestartTasks(workingDir string) ([]RestartTaskDecision, error) {
 
 // ReadCompletedTasks reads and parses .flock/memory/completed_tasks.json.
 func ReadCompletedTasks(workingDir string) ([]CompletedTaskDecision, error) {
-	path := filepath.Join(workingDir, memoryDir, completedFile)
+	path := filepath.Join(ResolveStateDir(workingDir), "memory", completedFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -169,7 +182,7 @@ func ReadCompletedTasks(workingDir string) ([]CompletedTaskDecision, error) {
 
 // ClearDecisionFiles removes the decision files after processing.
 func ClearDecisionFiles(workingDir string) {
-	os.Remove(filepath.Join(workingDir, memoryDir, newTasksFile))
-	os.Remove(filepath.Join(workingDir, memoryDir, restartFile))
-	os.Remove(filepath.Join(workingDir, memoryDir, completedFile))
+	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", newTasksFile))
+	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", restartFile))
+	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", completedFile))
 }
