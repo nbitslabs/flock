@@ -40,6 +40,7 @@ type OrchestratorSession struct {
 type Session struct {
 	ID         string
 	InstanceID string
+	ParentID   string
 	Title      string
 	Status     string
 	CreatedAt  string

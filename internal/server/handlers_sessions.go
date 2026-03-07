@@ -61,6 +61,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 				s.queries.UpsertSession(r.Context(), sqlc.UpsertSessionParams{
 					ID:         sess.ID,
 					InstanceID: instanceID,
+					ParentID:   sess.ParentID,
 					Title:      sess.Title,
 					Status:     "active",
 				})
