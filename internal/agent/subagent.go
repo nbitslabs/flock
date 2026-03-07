@@ -101,7 +101,7 @@ All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
 6. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
 7. Commit with the generated message
 8. Push the branch: `+"`git push -u origin %s`"+`
-9. Create a PR: `+"`gh pr create --title \"Fix #%d: %s\" --body \"Resolves #%d\"`"+`
+9. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, and the issue URL (%s). It will create a new PR or update an existing one and return the PR URL.
 
 ## Environment
 This project uses Nix for development tooling. To run commands with the devenv (compilers, linters, CLI utilities, etc.), wrap them with `+"`nix develop --impure -c bash -c \"<command>\"`"+`. For example: `+"`nix develop --impure -c bash -c \"go test ./...\"`"+`
@@ -126,7 +126,7 @@ This project uses Nix for development tooling. To run commands with the devenv (
 		task.IssueNumber, task.Title,
 		task.IssueNumber,
 		task.BranchName,
-		task.IssueNumber, task.Title, task.IssueNumber,
+		task.IssueNumber, task.Title, task.IssueUrl,
 		worktreeDir,
 		workingDir, task.IssueNumber,
 	)
