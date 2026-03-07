@@ -15,6 +15,7 @@
         flockAgentActive: false,
         flockAgentId: null,
         flockAgentSessionId: null,
+        viewingFlockAgent: false,
         selectedInstanceId: null,
         selectedSessionId: null,
         sessionBusy: false,
@@ -507,7 +508,8 @@
         updateInputState(); updateHeaderStatus();
         // Full reload from API — session.idle means processing is complete,
         // so the API has all committed messages.
-        if (store.selectedSessionId) loadMessages(store.selectedSessionId, false);
+        if (store.viewingFlockAgent) loadFlockAgentMessages();
+        else if (store.selectedSessionId) loadMessages(store.selectedSessionId, false);
     }
 
     // =========================================================================
@@ -518,7 +520,7 @@
         const input = document.getElementById('message-input');
         const content = input.value.trim();
         if (!content || store.sessionBusy) return;
-        if (store.flockAgentActive) {
+        if (store.viewingFlockAgent) {
             input.value = '';
             input.style.height = 'auto';
             store._lastSentText = content;
@@ -1257,6 +1259,7 @@
     function selectInstance(id) {
         store.selectedInstanceId = id;
         store.selectedSessionId = null;
+        store.viewingFlockAgent = false;
         store.sessions.clear(); store.messages.clear(); store.streamingParts.clear();
         store.sessionBusy = false; store.sessionBusyTool = null;
         closeEventSource();
@@ -1270,10 +1273,11 @@
     function selectFlockAgent() {
         store.selectedInstanceId = null;
         store.selectedSessionId = null;
+        store.viewingFlockAgent = true;
         store.sessions.clear(); store.messages.clear(); store.streamingParts.clear();
         store.sessionBusy = false; store.sessionBusyTool = null;
         closeEventSource();
-        renderInstances(); renderSessions(); renderMessages();
+        renderInstances(); renderSessions(); renderMessages(); updateHeader(); updateHeaderStatus(); updateInputState();
         document.getElementById('btn-new-session').classList.add('hidden');
         document.getElementById('input-area').classList.remove('hidden');
         document.getElementById('main-header').textContent = 'Flock Agent';
@@ -1284,6 +1288,7 @@
     function selectSession(id) {
         if (store.selectedSessionId === id) return;
         store.selectedSessionId = id;
+        store.viewingFlockAgent = false;
         store.messages.clear(); store.streamingParts.clear();
         store.sessionBusy = false; store.sessionBusyTool = null;
         renderSessions(); renderMessages(); updateHeader(); updateHeaderStatus(); updateInputState();

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -152,9 +154,47 @@ func (s *Server) handleGetAgentStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// ensureFlockAgentSession returns a valid flock agent session, creating a new
+// one if the existing session no longer exists in OpenCode.
+func (s *Server) ensureFlockAgentSession(ctx context.Context) (*sqlc.FlockAgentSession, error) {
+	session, err := s.queries.GetActiveFlockAgentSession(ctx)
+	if err == nil {
+		// Verify the OpenCode session still exists
+		if _, err := s.flockAgentClient.GetSession(ctx, session.SessionID); err == nil {
+			return &session, nil
+		}
+		log.Printf("flock agent session %s no longer exists in opencode, recreating", session.SessionID[:12])
+		s.queries.RetireFlockAgentSession(ctx, session.ID)
+	}
+
+	// Create a new session
+	ocSession, err := s.flockAgentClient.CreateSession(ctx, s.dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("create flock agent session: %w", err)
+	}
+
+	sessionID := ocSession.ID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
+
+	flockAgentID := uuid.New().String()
+	newSession, err := s.queries.CreateFlockAgentSession(ctx, sqlc.CreateFlockAgentSessionParams{
+		ID:               flockAgentID,
+		SessionID:        sessionID,
+		WorkingDirectory: s.dataDir,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("save flock agent session: %w", err)
+	}
+
+	log.Printf("created new flock agent session %s (opencode: %s)", flockAgentID[:8], sessionID[:12])
+	return &newSession, nil
+}
+
 // handleGetFlockAgentSession returns the current Flock agent session.
 func (s *Server) handleGetFlockAgentSession(w http.ResponseWriter, r *http.Request) {
-	session, err := s.queries.GetActiveFlockAgentSession(r.Context())
+	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
 		writeJSON(w, map[string]any{"active": false})
 		return
@@ -169,43 +209,17 @@ func (s *Server) handleGetFlockAgentSession(w http.ResponseWriter, r *http.Reque
 
 // handleCreateFlockAgentSession creates a new Flock agent session.
 func (s *Server) handleCreateFlockAgentSession(w http.ResponseWriter, r *http.Request) {
-	activeSession, err := s.queries.GetActiveFlockAgentSession(r.Context())
-	if err == nil && activeSession.Status == "active" {
-		writeJSON(w, map[string]any{
-			"id":     activeSession.ID,
-			"status": activeSession.Status,
-		})
-		return
-	}
-
-	ocSession, err := s.flockAgentClient.CreateSession(r.Context(), s.dataDir)
+	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
 		log.Printf("failed to create flock agent session: %v", err)
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
 	}
 
-	sessionID := ocSession.ID
-	if sessionID == "" {
-		sessionID = uuid.New().String()
-	}
-
-	flockAgentID := uuid.New().String()
-	_, err = s.queries.CreateFlockAgentSession(r.Context(), sqlc.CreateFlockAgentSessionParams{
-		ID:               flockAgentID,
-		SessionID:        sessionID,
-		WorkingDirectory: s.dataDir,
-	})
-	if err != nil {
-		log.Printf("failed to save flock agent session: %v", err)
-		http.Error(w, "failed to save session", http.StatusInternalServerError)
-		return
-	}
-
 	writeJSON(w, map[string]any{
-		"id":     flockAgentID,
-		"session_id": sessionID,
-		"status": "active",
+		"id":         session.ID,
+		"session_id": session.SessionID,
+		"status":     session.Status,
 	})
 }
 
@@ -249,7 +263,7 @@ func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Re
 
 // handleGetFlockAgentMessages returns messages for the Flock agent session.
 func (s *Server) handleGetFlockAgentMessages(w http.ResponseWriter, r *http.Request) {
-	session, err := s.queries.GetActiveFlockAgentSession(r.Context())
+	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
 		http.Error(w, "no active session", http.StatusNotFound)
 		return
@@ -266,9 +280,9 @@ func (s *Server) handleGetFlockAgentMessages(w http.ResponseWriter, r *http.Requ
 
 // handleSendFlockAgentMessage sends a message to the Flock agent session.
 func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Request) {
-	session, err := s.queries.GetActiveFlockAgentSession(r.Context())
+	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
-		http.Error(w, "no active session", http.StatusNotFound)
+		http.Error(w, "no active session", http.StatusInternalServerError)
 		return
 	}
 
@@ -290,7 +304,7 @@ func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Requ
 
 // handleFlockAgentEvents returns SSE events for the Flock agent session.
 func (s *Server) handleFlockAgentEvents(w http.ResponseWriter, r *http.Request) {
-	session, err := s.queries.GetActiveFlockAgentSession(r.Context())
+	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
 		http.Error(w, "no active session", http.StatusNotFound)
 		return
