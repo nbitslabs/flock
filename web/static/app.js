@@ -249,6 +249,21 @@
         } catch (e) { alert('Failed to create session: ' + e.message); }
     }
 
+    async function deleteSession(id) {
+        try { await api('DELETE', `/api/sessions/${id}`); } catch (e) { /* ignore */ }
+        if (store.selectedSessionId === id) {
+            store.selectedSessionId = null;
+            store.messages.clear();
+            store.streamingParts.clear();
+            closeEventSource();
+            renderSessions(); renderMessages(); updateHeader();
+            updateURL();
+            document.getElementById('input-area').classList.add('hidden');
+        }
+        store._sessionHash = '';
+        if (store.selectedInstanceId) await loadSessions(store.selectedInstanceId);
+    }
+
     // Load messages from API.
     // merge=false (default): clear store first — used on session select and session idle.
     // merge=true: keep existing messages and layer API data on top (currently unused).
@@ -1026,7 +1041,11 @@
             'data-action': 'select-session', 'data-id': sess.id, title,
         });
         div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
-        div.appendChild(h('span', { className: 'truncate', textContent: title }));
+        div.appendChild(h('span', { className: 'truncate flex-1', textContent: title }));
+        div.appendChild(h('button', {
+            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
+        }));
         return div;
     }
 
@@ -1038,8 +1057,18 @@
         el.title = title;
         const dot = el.querySelector('span:first-child');
         if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
-        const titleEl = el.querySelector('span:last-child');
+        const children = Array.from(el.children);
+        const titleEl = children[1];
         if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
+        let delBtn = children[2];
+        if (!delBtn || !delBtn.dataset.action) {
+            delBtn = h('button', {
+                className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+                'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
+            });
+            if (children[2]) el.insertBefore(delBtn, children[2]);
+            else el.appendChild(delBtn);
+        }
     }
 
     // =========================================================================
@@ -1175,6 +1204,7 @@
             case 'select-instance': selectInstance(t.dataset.id); break;
             case 'delete-instance': e.stopPropagation(); if (confirm('Remove this instance?')) deleteInstance(t.dataset.id); break;
             case 'select-session': selectSession(t.dataset.id); break;
+            case 'delete-session': e.stopPropagation(); if (confirm('Delete this session?')) deleteSession(t.dataset.id); break;
             case 'select-flock-agent': selectFlockAgent(); break;
         }
     });

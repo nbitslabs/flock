@@ -110,6 +110,23 @@ func (c *Client) SendMessage(ctx context.Context, sessionID string, content stri
 	return nil
 }
 
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/session/"+sessionID, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("delete session: status %d: %s", resp.StatusCode, respBody)
+	}
+	return nil
+}
+
 // SubscribeEvents opens an SSE connection to the OpenCode /event endpoint.
 // OpenCode sends events as `data: {"type":"...", "properties":{...}}` lines.
 // Blocks until context is cancelled or the stream ends.

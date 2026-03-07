@@ -45,6 +45,9 @@ UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?;
 -- name: DeleteSessionsByInstance :exec
 DELETE FROM sessions WHERE instance_id = ?;
 
+-- name: DeleteSession :exec
+DELETE FROM sessions WHERE id = ?;
+
 -- Task queries
 
 -- name: CreateTask :one

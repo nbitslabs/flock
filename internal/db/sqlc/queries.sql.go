@@ -192,6 +192,15 @@ func (q *Queries) DeleteOrchestratorSessionsByInstance(ctx context.Context, inst
 	return err
 }
 
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions WHERE id = ?
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteSession, id)
+	return err
+}
+
 const deleteSessionsByInstance = `-- name: DeleteSessionsByInstance :exec
 DELETE FROM sessions WHERE instance_id = ?
 `

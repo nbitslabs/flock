@@ -161,3 +161,26 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	s.broker.ServeHTTP(w, r, sessionID)
 }
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	session, err := s.queries.GetSession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	inst, ok := s.manager.Get(session.InstanceID)
+	if ok && inst.Client != nil {
+		if err := inst.Client.DeleteSession(r.Context(), sessionID); err != nil {
+			log.Printf("failed to delete session from opencode: %v", err)
+		}
+	}
+
+	if err := s.queries.DeleteSession(r.Context(), sessionID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
