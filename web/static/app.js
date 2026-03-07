@@ -1016,7 +1016,7 @@
             div.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
         }
         div.appendChild(h('button', {
-            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            className: 'text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 flex-shrink-0',
             'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
         }));
         return div;
@@ -1065,7 +1065,7 @@
             div.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
         }
         div.appendChild(h('button', {
-            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            className: 'text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 flex-shrink-0',
             'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
         }));
         return div;
@@ -1169,7 +1169,7 @@
         }
         div.appendChild(h('span', { className: 'truncate flex-1', textContent: title }));
         div.appendChild(h('button', {
-            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            className: 'text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 flex-shrink-0',
             'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
         }));
         return div;
@@ -1198,7 +1198,7 @@
         let delBtn = children[2];
         if (!delBtn || !delBtn.dataset.action) {
             delBtn = h('button', {
-                className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+                className: 'text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 flex-shrink-0',
                 'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
             });
             if (children[2]) el.insertBefore(delBtn, children[2]);
