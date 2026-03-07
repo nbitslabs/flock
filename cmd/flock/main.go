@@ -41,6 +41,10 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("starting flock (opencode: %s)...", cfg.OpenCodeURL)
 
+	if err := opencode.SyncAgents(); err != nil {
+		log.Printf("warning: failed to sync agents: %v", err)
+	}
+
 	// Open database
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
