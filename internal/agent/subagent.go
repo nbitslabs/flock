@@ -97,9 +97,11 @@ All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
 2. Understand the codebase and the issue
 3. Implement the fix/feature
 4. Run tests to verify
-5. Commit your changes with a clear message referencing the issue: `+"`Fixes #%d`"+`
-6. Push the branch: `+"`git push -u origin %s`"+`
-7. Create a PR: `+"`gh pr create --title \"Fix #%d: %s\" --body \"Resolves #%d\"`"+`
+5. Stage your changes with `+"`git add`"+`
+6. Generate a commit message using the `+"`flock-commit-writer`"+` subagent — invoke it with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
+7. Commit with the generated message
+8. Push the branch: `+"`git push -u origin %s`"+`
+9. Create a PR: `+"`gh pr create --title \"Fix #%d: %s\" --body \"Resolves #%d\"`"+`
 
 ## Environment
 This project uses Nix for development tooling. To run commands with the devenv (compilers, linters, CLI utilities, etc.), wrap them with `+"`nix develop --impure -c bash -c \"<command>\"`"+`. For example: `+"`nix develop --impure -c bash -c \"go test ./...\"`"+`
@@ -121,6 +123,7 @@ This project uses Nix for development tooling. To run commands with the devenv (
 		task.Title,
 		task.IssueUrl,
 		task.IssueNumber,
+		task.IssueNumber, task.Title,
 		task.IssueNumber,
 		task.BranchName,
 		task.IssueNumber, task.Title, task.IssueNumber,
