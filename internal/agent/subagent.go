@@ -98,7 +98,7 @@ All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
 3. Implement the fix/feature
 4. Run tests to verify
 5. Stage your changes with `+"`git add`"+`
-6. Generate a commit message using the `+"`flock-commit-writer`"+` subagent — invoke it with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
+6. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
 7. Commit with the generated message
 8. Push the branch: `+"`git push -u origin %s`"+`
 9. Create a PR: `+"`gh pr create --title \"Fix #%d: %s\" --body \"Resolves #%d\"`"+`
