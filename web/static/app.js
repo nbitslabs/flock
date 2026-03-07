@@ -1108,18 +1108,65 @@
         if (!list) return;
         const items = Array.from(store.sessions.values());
         if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 py-2">No sessions</p>'; return; }
-        reconcileList(list, items, s => s.id, createSessionEl, updateSessionEl);
+
+        // Build parent -> children map
+        const childrenMap = new Map();
+        const rootSessions = [];
+
+        for (const sess of items) {
+            const pid = sess.parent_id || sess.parentID || '';
+            if (!pid) {
+                rootSessions.push(sess);
+            } else {
+                if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+                childrenMap.get(pid).push(sess);
+            }
+        }
+
+        // Build flattened list with hierarchy info
+        function flattenWithChildren(session, depth = 0) {
+            const result = [{ session, depth }];
+            const children = childrenMap.get(session.id) || [];
+            for (const child of children) {
+                result.push(...flattenWithChildren(child, depth + 1));
+            }
+            return result;
+        }
+
+        const flattened = [];
+        for (const sess of rootSessions) {
+            flattened.push(...flattenWithChildren(sess));
+        }
+
+        // Include any orphaned children (parent not in our list)
+        for (const sess of items) {
+            const pid = sess.parent_id || sess.parentID || '';
+            if (pid && !store.sessions.has(pid)) {
+                flattened.push({ session: sess, depth: 1 });
+            }
+        }
+
+        reconcileList(list, flattened, item => item.session.id,
+            item => createSessionEl(item.session, item.depth),
+            (el, item) => updateSessionEl(el, item.session, item.depth));
     }
 
-    function createSessionEl(sess) {
+    function createSessionEl(sess, depth = 0) {
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
+        const indent = depth * 12;
+        const isSubAgent = depth > 0;
         const div = h('div', {
             className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`,
             'data-action': 'select-session', 'data-id': sess.id, title,
         });
-        div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
+        div.style.paddingLeft = `${8 + indent}px`;
+        if (isSubAgent) {
+            div.appendChild(h('span', { className: 'text-xs text-purple-400 dark:text-purple-500', textContent: '\u21b3' }));
+        } else {
+            div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
+        }
         div.appendChild(h('span', { className: 'truncate flex-1', textContent: title }));
         div.appendChild(h('button', {
             className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
@@ -1128,14 +1175,23 @@
         return div;
     }
 
-    function updateSessionEl(el, sess) {
+    function updateSessionEl(el, sess, depth = 0) {
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
+        const isSubAgent = depth > 0;
+        el.style.paddingLeft = `${8 + depth * 12}px`;
         el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`;
         el.title = title;
         const dot = el.querySelector('span:first-child');
-        if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
+        if (dot) {
+            if (isSubAgent) {
+                dot.className = 'text-xs text-purple-400 dark:text-purple-500';
+                dot.textContent = '\u21b3';
+            } else {
+                dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
+            }
+        }
         const children = Array.from(el.children);
         const titleEl = children[1];
         if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;

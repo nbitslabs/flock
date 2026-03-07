@@ -104,9 +104,9 @@ func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrche
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (id, instance_id, title, status)
-VALUES (?, ?, ?, ?)
-RETURNING id, instance_id, title, status, created_at, updated_at
+INSERT INTO sessions (id, instance_id, parent_id, title, status)
+VALUES (?, ?, '', ?, ?)
+RETURNING id, instance_id, parent_id, title, status, created_at, updated_at
 `
 
 type CreateSessionParams struct {
@@ -127,6 +127,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.InstanceID,
+		&i.ParentID,
 		&i.Title,
 		&i.Status,
 		&i.CreatedAt,
@@ -334,7 +335,7 @@ func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID str
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, instance_id, title, status, created_at, updated_at FROM sessions WHERE id = ?
+SELECT id, instance_id, parent_id, title, status, created_at, updated_at FROM sessions WHERE id = ?
 `
 
 func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
@@ -343,6 +344,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.InstanceID,
+		&i.ParentID,
 		&i.Title,
 		&i.Status,
 		&i.CreatedAt,
@@ -494,7 +496,7 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 }
 
 const listSessionsByInstance = `-- name: ListSessionsByInstance :many
-SELECT id, instance_id, title, status, created_at, updated_at FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
+SELECT id, instance_id, parent_id, title, status, created_at, updated_at FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string) ([]Session, error) {
@@ -509,6 +511,7 @@ func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string)
 		if err := rows.Scan(
 			&i.ID,
 			&i.InstanceID,
+			&i.ParentID,
 			&i.Title,
 			&i.Status,
 			&i.CreatedAt,
@@ -743,9 +746,10 @@ func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusPara
 }
 
 const upsertSession = `-- name: UpsertSession :exec
-INSERT INTO sessions (id, instance_id, title, status)
-VALUES (?, ?, ?, ?)
+INSERT INTO sessions (id, instance_id, parent_id, title, status)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
+  parent_id = excluded.parent_id,
   title = excluded.title,
   updated_at = datetime('now')
 `
@@ -753,6 +757,7 @@ ON CONFLICT(id) DO UPDATE SET
 type UpsertSessionParams struct {
 	ID         string
 	InstanceID string
+	ParentID   string
 	Title      string
 	Status     string
 }
@@ -761,6 +766,7 @@ func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) er
 	_, err := q.db.ExecContext(ctx, upsertSession,
 		arg.ID,
 		arg.InstanceID,
+		arg.ParentID,
 		arg.Title,
 		arg.Status,
 	)
