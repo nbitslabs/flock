@@ -27,7 +27,7 @@ func SyncAgents() error {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
 
@@ -41,13 +41,13 @@ func SyncAgents() error {
 	return nil
 }
 
-func syncAgent(agentsDir, agentName string) error {
-	embeddedContent, err := fs.ReadFile(agents.FS, agentName+".md")
+func syncAgent(agentsDir, fileName string) error {
+	embeddedContent, err := fs.ReadFile(agents.FS, fileName)
 	if err != nil {
 		return fmt.Errorf("read embedded agent: %w", err)
 	}
 
-	targetPath := filepath.Join(agentsDir, agentName+".md")
+	targetPath := filepath.Join(agentsDir, fileName)
 
 	existingContent, err := os.ReadFile(targetPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -62,7 +62,7 @@ func syncAgent(agentsDir, agentName string) error {
 		return fmt.Errorf("write agent: %w", err)
 	}
 
-	log.Printf("installed/updated agent: %s", agentName)
+	log.Printf("installed/updated agent: %s", fileName)
 	return nil
 }
 
