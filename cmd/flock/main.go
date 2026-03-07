@@ -38,6 +38,11 @@ func main() {
 		cfg.DBPath = *flagDB
 	}
 
+	// Ensure the global data directory exists
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		log.Fatalf("failed to create data dir %s: %v", cfg.DataDir, err)
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("starting flock (opencode: %s)...", cfg.OpenCodeURL)
 
