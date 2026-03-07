@@ -38,18 +38,25 @@ func (q *Queries) CreateFlockAgentSession(ctx context.Context, arg CreateFlockAg
 }
 
 const createInstance = `-- name: CreateInstance :one
-INSERT INTO instances (id, pid, port, working_directory, status)
-VALUES (?, 0, 0, ?, 'running')
-RETURNING id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash
+INSERT INTO instances (id, pid, port, working_directory, status, org, repo)
+VALUES (?, 0, 0, ?, 'running', ?, ?)
+RETURNING id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo
 `
 
 type CreateInstanceParams struct {
 	ID               string
 	WorkingDirectory string
+	Org              string
+	Repo             string
 }
 
 func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) (Instance, error) {
-	row := q.db.QueryRowContext(ctx, createInstance, arg.ID, arg.WorkingDirectory)
+	row := q.db.QueryRowContext(ctx, createInstance,
+		arg.ID,
+		arg.WorkingDirectory,
+		arg.Org,
+		arg.Repo,
+	)
 	var i Instance
 	err := row.Scan(
 		&i.ID,
@@ -60,6 +67,8 @@ func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HeartbeatHash,
+		&i.Org,
+		&i.Repo,
 	)
 	return i, err
 }
@@ -278,7 +287,7 @@ func (q *Queries) GetFlockAgentSession(ctx context.Context, id string) (FlockAge
 }
 
 const getInstance = `-- name: GetInstance :one
-SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash FROM instances WHERE id = ?
+SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo FROM instances WHERE id = ?
 `
 
 func (q *Queries) GetInstance(ctx context.Context, id string) (Instance, error) {
@@ -293,6 +302,8 @@ func (q *Queries) GetInstance(ctx context.Context, id string) (Instance, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HeartbeatHash,
+		&i.Org,
+		&i.Repo,
 	)
 	return i, err
 }
@@ -445,7 +456,7 @@ func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Tas
 }
 
 const listInstances = `-- name: ListInstances :many
-SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash FROM instances ORDER BY created_at DESC
+SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo FROM instances ORDER BY created_at DESC
 `
 
 func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
@@ -466,6 +477,8 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HeartbeatHash,
+			&i.Org,
+			&i.Repo,
 		); err != nil {
 			return nil, err
 		}

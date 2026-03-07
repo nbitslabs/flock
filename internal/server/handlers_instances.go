@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -22,14 +23,64 @@ func expandHome(path string) string {
 }
 
 type createInstanceRequest struct {
-	WorkingDirectory string `json:"working_directory"`
+	GitHubURL string `json:"github_url"`
 }
 
 type instanceResponse struct {
 	ID               string `json:"id"`
 	WorkingDirectory string `json:"working_directory"`
+	Org              string `json:"org,omitempty"`
+	Repo             string `json:"repo,omitempty"`
 	Status           string `json:"status"`
 	LastHeartbeatAt  string `json:"last_heartbeat_at,omitempty"`
+}
+
+func parseGitHubURL(url string) (org, repo string, err error) {
+	url = strings.TrimSpace(url)
+	url = strings.TrimSuffix(url, ".git")
+
+	var path string
+
+	if strings.HasPrefix(url, "https://github.com/") {
+		path = strings.TrimPrefix(url, "https://github.com/")
+	} else if strings.HasPrefix(url, "git@github.com:") {
+		path = strings.TrimPrefix(url, "git@github.com:")
+	} else if strings.HasPrefix(url, "github.com/") {
+		path = strings.TrimPrefix(url, "github.com/")
+	} else {
+		return "", "", nil
+	}
+
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return "", "", nil
+	}
+
+	return parts[0], parts[1], nil
+}
+
+func cloneOrGetRepo(basePath, org, repo string) (string, error) {
+	repoPath := filepath.Join(basePath, "github.com", org, repo)
+
+	if _, err := os.Stat(repoPath); err == nil {
+		return repoPath, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	orgPath := filepath.Join(basePath, "github.com", org)
+	if err := os.MkdirAll(orgPath, 0755); err != nil {
+		return "", err
+	}
+
+	gitURL := "git@github.com:" + org + "/" + repo + ".git"
+	cmd := exec.Command("git", "clone", "--depth", "1", gitURL, repoPath)
+	cmd.Dir = orgPath
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	return repoPath, nil
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
@@ -74,14 +125,28 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req.WorkingDirectory == "" {
-		http.Error(w, "working_directory is required", http.StatusBadRequest)
+	if req.GitHubURL == "" {
+		http.Error(w, "github_url is required", http.StatusBadRequest)
 		return
 	}
 
-	workingDir := expandHome(req.WorkingDirectory)
+	org, repo, err := parseGitHubURL(req.GitHubURL)
+	if err != nil {
+		http.Error(w, "invalid GitHub URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if org == "" || repo == "" {
+		http.Error(w, "invalid GitHub URL format. Expected: https://github.com/org/repo", http.StatusBadRequest)
+		return
+	}
 
-	inst, err := s.manager.Register(r.Context(), workingDir)
+	workingDir, err := cloneOrGetRepo(s.basePath, org, repo)
+	if err != nil {
+		http.Error(w, "failed to clone repository: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	inst, err := s.manager.Register(r.Context(), workingDir, org, repo)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -91,6 +156,8 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, instanceResponse{
 		ID:               inst.ID,
 		WorkingDirectory: inst.WorkingDirectory,
+		Org:              inst.Org,
+		Repo:             inst.Repo,
 		Status:           inst.Status,
 	})
 }
@@ -112,6 +179,8 @@ func dbInstanceToResponse(inst sqlc.Instance) instanceResponse {
 	return instanceResponse{
 		ID:               inst.ID,
 		WorkingDirectory: inst.WorkingDirectory,
+		Org:              inst.Org,
+		Repo:             inst.Repo,
 		Status:           inst.Status,
 	}
 }

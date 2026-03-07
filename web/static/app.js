@@ -185,7 +185,7 @@
     async function refreshInstances() {
         try {
             const list = await api('GET', '/api/instances') || [];
-            const hash = JSON.stringify(list.map(i => [i.id, i.status, i.working_directory, i.last_heartbeat_at]));
+            const hash = JSON.stringify(list.map(i => [i.id, i.status, i.working_directory, i.last_heartbeat_at, i.org, i.repo]));
             if (hash === store._instanceHash) return;
             store._instanceHash = hash;
             store.instances.clear();
@@ -194,9 +194,9 @@
         } catch (e) { console.error('refreshInstances:', e); }
     }
 
-    async function createInstance(workDir) {
+    async function createInstance(githubURL) {
         try {
-            await api('POST', '/api/instances', { working_directory: workDir });
+            await api('POST', '/api/instances', { github_url: githubURL });
             store._instanceHash = '';
             await refreshInstances();
         } catch (e) { alert('Failed to create instance: ' + e.message); }
@@ -969,7 +969,86 @@
         if (!list) return;
         const items = Array.from(store.instances.values());
         if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 py-2">No instances running</p>'; return; }
-        reconcileList(list, items, i => i.id, createInstanceEl, updateInstanceEl);
+
+        const orgMap = new Map();
+        for (const inst of items) {
+            const org = inst.org || 'unknown';
+            if (!orgMap.has(org)) orgMap.set(org, []);
+            orgMap.get(org).push(inst);
+        }
+
+        const sortedOrgs = Array.from(orgMap.keys()).sort();
+        const fragment = document.createDocumentFragment();
+
+        for (const org of sortedOrgs) {
+            const orgInstances = orgMap.get(org);
+            const orgDiv = h('div', { className: 'mb-2' });
+            const orgHeader = h('div', {
+                className: 'flex items-center gap-1 px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider',
+            });
+            orgHeader.appendChild(h('span', { textContent: org }));
+            orgDiv.appendChild(orgHeader);
+
+            for (const inst of orgInstances) {
+                const el = createInstanceEl(inst);
+                el.dataset.org = org;
+                orgDiv.appendChild(el);
+            }
+            fragment.appendChild(orgDiv);
+        }
+
+        list.textContent = '';
+        list.appendChild(fragment);
+    }
+
+    function createInstanceEl(inst) {
+        const sel = inst.id === store.selectedInstanceId;
+        const repo = inst.repo || inst.working_directory.split('/').pop() || 'unknown';
+        const div = h('div', {
+            className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`,
+            'data-action': 'select-instance', 'data-id': inst.id,
+        });
+        div.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0` }));
+        div.appendChild(h('span', { className: 'text-sm truncate flex-1 text-gray-700 dark:text-gray-200', textContent: repo, title: inst.working_directory }));
+        if (inst.last_heartbeat_at) {
+            const relativeTime = formatRelativeTime(inst.last_heartbeat_at);
+            const exactTime = formatTime(inst.last_heartbeat_at);
+            div.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime }));
+        }
+        div.appendChild(h('button', {
+            className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
+            'data-action': 'delete-instance', 'data-id': inst.id, textContent: '\u00d7',
+        }));
+        return div;
+    }
+
+    function updateInstanceEl(el, inst) {
+        const sel = inst.id === store.selectedInstanceId;
+        const repo = inst.repo || inst.working_directory.split('/').pop() || 'unknown';
+        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group ${sel ? 'bg-gray-200 dark:bg-gray-700' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`;
+        const dot = el.querySelector('span:first-child');
+        if (dot) dot.className = `w-2 h-2 rounded-full ${statusColor(inst.status)} flex-shrink-0`;
+        const children = Array.from(el.children);
+        const textEl = children[1];
+        if (textEl) {
+            textEl.textContent = repo;
+            textEl.title = inst.working_directory;
+        }
+        let hbEl = children[2];
+        if (inst.last_heartbeat_at) {
+            const relativeTime = formatRelativeTime(inst.last_heartbeat_at);
+            const exactTime = formatTime(inst.last_heartbeat_at);
+            if (hbEl && hbEl.tagName === 'SPAN' && !hbEl.dataset.action) {
+                hbEl.textContent = relativeTime;
+                hbEl.title = exactTime;
+            } else {
+                hbEl = h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', title: exactTime, textContent: relativeTime });
+                if (children[2]) el.insertBefore(hbEl, children[2]);
+                else el.appendChild(hbEl);
+            }
+        } else if (hbEl && hbEl.tagName === 'SPAN' && !hbEl.dataset.action) {
+            hbEl.remove();
+        }
     }
 
     function createInstanceEl(inst) {
@@ -1165,7 +1244,12 @@
             el.textContent = store.sessions.get(store.selectedSessionId)?.title || 'Session';
         } else if (store.selectedInstanceId) {
             const inst = store.instances.get(store.selectedInstanceId);
-            el.textContent = inst ? `Instance: ${inst.working_directory}` : 'Instance';
+            if (inst) {
+                const orgRepo = inst.org && inst.repo ? `${inst.org}/${inst.repo}` : inst.working_directory.split('/').slice(-2).join('/');
+                el.textContent = `Instance: ${orgRepo}`;
+            } else {
+                el.textContent = 'Instance';
+            }
         } else { el.textContent = 'Select an instance to get started'; }
     }
 
@@ -1211,17 +1295,17 @@
 
     document.getElementById('btn-new-instance').addEventListener('click', () => {
         document.getElementById('modal-new-instance').classList.remove('hidden');
-        document.getElementById('input-workdir').value = '';
-        document.getElementById('input-workdir').focus();
+        document.getElementById('input-github-url').value = '';
+        document.getElementById('input-github-url').focus();
     });
     document.getElementById('btn-cancel-instance').addEventListener('click', () => document.getElementById('modal-new-instance').classList.add('hidden'));
     document.getElementById('btn-create-instance').addEventListener('click', () => {
-        const wd = document.getElementById('input-workdir').value.trim();
-        if (!wd) return;
+        const url = document.getElementById('input-github-url').value.trim();
+        if (!url) return;
         document.getElementById('modal-new-instance').classList.add('hidden');
-        createInstance(wd);
+        createInstance(url);
     });
-    document.getElementById('input-workdir').addEventListener('keydown', (e) => {
+    document.getElementById('input-github-url').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-create-instance').click(); }
     });
     document.getElementById('btn-new-session').addEventListener('click', () => {

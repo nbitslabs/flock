@@ -22,6 +22,8 @@ type Instance struct {
 	CreatedAt        string
 	UpdatedAt        string
 	HeartbeatHash    string
+	Org              string
+	Repo             string
 }
 
 type OrchestratorSession struct {

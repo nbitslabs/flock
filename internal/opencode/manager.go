@@ -15,6 +15,8 @@ import (
 type Instance struct {
 	ID               string
 	WorkingDirectory string
+	Org              string
+	Repo             string
 	Status           string
 	Client           *Client
 }
@@ -90,12 +92,14 @@ func (m *Manager) subscribeEvents(ctx context.Context) {
 
 // Register creates a new instance record for the given working directory and
 // adds it to the in-memory map with the shared client.
-func (m *Manager) Register(ctx context.Context, workingDir string) (*Instance, error) {
+func (m *Manager) Register(ctx context.Context, workingDir, org, repo string) (*Instance, error) {
 	id := uuid.New().String()
 
 	if _, err := m.queries.CreateInstance(ctx, sqlc.CreateInstanceParams{
 		ID:               id,
 		WorkingDirectory: workingDir,
+		Org:              org,
+		Repo:             repo,
 	}); err != nil {
 		return nil, fmt.Errorf("create instance record: %w", err)
 	}
@@ -103,6 +107,8 @@ func (m *Manager) Register(ctx context.Context, workingDir string) (*Instance, e
 	inst := &Instance{
 		ID:               id,
 		WorkingDirectory: workingDir,
+		Org:              org,
+		Repo:             repo,
 		Status:           "running",
 		Client:           m.client,
 	}
@@ -111,7 +117,7 @@ func (m *Manager) Register(ctx context.Context, workingDir string) (*Instance, e
 	m.instances[id] = inst
 	m.mu.Unlock()
 
-	log.Printf("registered instance %s for %s", id[:8], workingDir)
+	log.Printf("registered instance %s for %s (org: %s, repo: %s)", id[:8], workingDir, org, repo)
 
 	if m.instanceHook != nil {
 		m.instanceHook("register", inst)
@@ -133,6 +139,8 @@ func (m *Manager) LoadExisting(ctx context.Context) error {
 		m.instances[dbi.ID] = &Instance{
 			ID:               dbi.ID,
 			WorkingDirectory: dbi.WorkingDirectory,
+			Org:              dbi.Org,
+			Repo:             dbi.Repo,
 			Status:           "running",
 			Client:           m.client,
 		}
