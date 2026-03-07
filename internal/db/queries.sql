@@ -12,6 +12,12 @@ RETURNING *;
 -- name: UpdateInstanceStatus :exec
 UPDATE instances SET status = ?, updated_at = datetime('now') WHERE id = ?;
 
+-- name: GetInstanceHeartbeatHash :one
+SELECT heartbeat_hash FROM instances WHERE id = ?;
+
+-- name: UpdateInstanceHeartbeatHash :exec
+UPDATE instances SET heartbeat_hash = ?, updated_at = datetime('now') WHERE id = ?;
+
 -- name: DeleteInstance :exec
 DELETE FROM instances WHERE id = ?;
 

@@ -2,9 +2,14 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/nbitslabs/flock/internal/db/sqlc"
 	"github.com/nbitslabs/flock/internal/memory"
@@ -83,6 +88,11 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 	// Ensure .flock directory layout
 	if err := memory.EnsureLayout(workingDir); err != nil {
 		log.Printf("agent: failed to ensure layout for %s: %v", truncID(instanceID), err)
+	}
+
+	// Check if heartbeat needs upgrade
+	if err := h.upgradeHeartbeatIfNeeded(instanceID, workingDir); err != nil {
+		log.Printf("agent: heartbeat upgrade failed for %s: %v", truncID(instanceID), err)
 	}
 
 	orch := NewOrchestrator(h.client, h.queries, instanceID, workingDir, h.cfg, h.subscribeFn)
@@ -170,4 +180,86 @@ func (h *Harness) updateTaskActivityForSession(sessionID string) {
 // Enabled returns whether the agent harness is enabled.
 func (h *Harness) Enabled() bool {
 	return h.cfg.Enabled
+}
+
+// upgradeHeartbeatIfNeeded checks if the heartbeat template has been updated
+// and upgrades it if necessary using OpenCode to merge the changes.
+func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error {
+	ctx := context.Background()
+	currentHash := memory.TemplateHash()
+
+	storedHash, err := h.queries.GetInstanceHeartbeatHash(ctx, instanceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			storedHash = ""
+		} else {
+			return fmt.Errorf("get heartbeat hash: %w", err)
+		}
+	}
+
+	if storedHash == currentHash {
+		return nil
+	}
+
+	if storedHash == "" {
+		log.Printf("agent: storing initial heartbeat hash for instance %s", truncID(instanceID))
+		h.queries.UpdateInstanceHeartbeatHash(ctx, sqlc.UpdateInstanceHeartbeatHashParams{
+			HeartbeatHash: currentHash,
+			ID:            instanceID,
+		})
+		return nil
+	}
+
+	log.Printf("agent: heartbeat template changed for instance %s, upgrading", truncID(instanceID))
+
+	prompt, err := memory.HeartbeatUpgradePrompt(workingDir)
+	if err != nil {
+		return fmt.Errorf("generate upgrade prompt: %w", err)
+	}
+
+	session, err := h.client.CreateSession(ctx)
+	if err != nil {
+		return fmt.Errorf("create upgrade session: %w", err)
+	}
+
+	if err := h.client.SendMessage(ctx, session.ID, prompt); err != nil {
+		return fmt.Errorf("send upgrade prompt: %w", err)
+	}
+
+	ch, unsub := h.subscribeFn(session.ID)
+	defer unsub()
+
+	timeout := h.cfg.WaitForIdleTimeout
+	if timeout == 0 {
+		timeout = 3 * time.Minute
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case raw, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			data := strings.TrimPrefix(raw, "data: ")
+			data = strings.TrimSpace(data)
+			var env struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal([]byte(data), &env) == nil && env.Type == "session.idle" {
+				log.Printf("agent: heartbeat upgrade completed for instance %s", truncID(instanceID))
+				h.queries.UpdateInstanceHeartbeatHash(ctx, sqlc.UpdateInstanceHeartbeatHashParams{
+					HeartbeatHash: currentHash,
+					ID:            instanceID,
+				})
+				return nil
+			}
+		case <-timer.C:
+			return fmt.Errorf("timeout waiting for heartbeat upgrade")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
