@@ -99,7 +99,7 @@ func main() {
 	manager.StartEventSubscription()
 
 	// Create HTTP server (reuse same client for flock agent - it uses the data dir as working dir)
-	srv := server.New(queries, manager, broker, harness, cfg.DataDir, client)
+	srv := server.New(queries, manager, broker, harness, cfg.DataDir, cfg.BasePath, client)
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: srv,

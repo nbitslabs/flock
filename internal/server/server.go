@@ -19,11 +19,12 @@ type Server struct {
 	broker             *SSEBroker
 	harness            *agent.Harness
 	dataDir            string
+	basePath           string
 	tmpl               *template.Template
 	flockAgentClient   *opencode.Client
 }
 
-func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir string, flockAgentClient *opencode.Client) *Server {
+func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir, basePath string, flockAgentClient *opencode.Client) *Server {
 	s := &Server{
 		mux:              http.NewServeMux(),
 		queries:          queries,
@@ -31,6 +32,7 @@ func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, ha
 		broker:           broker,
 		harness:          harness,
 		dataDir:          dataDir,
+		basePath:         basePath,
 		flockAgentClient: flockAgentClient,
 	}
 	s.setupRoutes()

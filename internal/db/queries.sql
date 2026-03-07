@@ -5,8 +5,8 @@ SELECT * FROM instances ORDER BY created_at DESC;
 SELECT * FROM instances WHERE id = ?;
 
 -- name: CreateInstance :one
-INSERT INTO instances (id, pid, port, working_directory, status)
-VALUES (?, 0, 0, ?, 'running')
+INSERT INTO instances (id, pid, port, working_directory, status, org, repo)
+VALUES (?, 0, 0, ?, 'running', ?, ?)
 RETURNING *;
 
 -- name: UpdateInstanceStatus :exec

@@ -15,6 +15,7 @@ type Config struct {
 	Addr        string            `toml:"addr"`
 	DBPath      string            `toml:"db"`
 	DataDir     string            `toml:"data_dir"`
+	BasePath    string            `toml:"base_path"`
 	Agent       agent.AgentConfig `toml:"agent"`
 }
 
@@ -26,6 +27,7 @@ func Load(configPath string) *Config {
 		Addr:        ":8080",
 		DBPath:      "flock.db",
 		DataDir:     ".",
+		BasePath:    ".",
 		Agent:       agent.DefaultAgentConfig(),
 	}
 
@@ -49,6 +51,9 @@ func Load(configPath string) *Config {
 	if v := os.Getenv("FLOCK_DATA_DIR"); v != "" {
 		cfg.DataDir = v
 		cfg.Agent.DataDir = v
+	}
+	if v := os.Getenv("FLOCK_BASE_PATH"); v != "" {
+		cfg.BasePath = v
 	}
 	if os.Getenv("FLOCK_AGENT_ENABLED") == "true" {
 		cfg.Agent.Enabled = true
