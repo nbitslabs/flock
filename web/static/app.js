@@ -1103,40 +1103,108 @@
         return { running: 'bg-green-500', starting: 'bg-yellow-500 animate-pulse', error: 'bg-red-500', stopped: 'bg-gray-500' }[s] || 'bg-gray-500';
     }
 
+    function buildSessionTree(sessions) {
+        const sessionMap = new Map();
+        const rootSessions = [];
+        for (const s of sessions) {
+            sessionMap.set(s.id, { ...s, children: [] });
+        }
+        for (const s of sessionMap.values()) {
+            if (s.parentID && sessionMap.has(s.parentID)) {
+                sessionMap.get(s.parentID).children.push(s);
+            } else {
+                rootSessions.push(s);
+            }
+        }
+        return rootSessions;
+    }
+
     function renderSessions() {
         const list = document.getElementById('session-list');
         if (!list) return;
         const items = Array.from(store.sessions.values());
         if (!items.length) { list.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 py-2">No sessions</p>'; return; }
-        reconcileList(list, items, s => s.id, createSessionEl, updateSessionEl);
+        const tree = buildSessionTree(items);
+        reconcileSessionTree(list, tree, 0);
     }
 
-    function createSessionEl(sess) {
+    function reconcileSessionTree(container, tree, depth) {
+        const existingMap = new Map();
+        for (const child of Array.from(container.children)) {
+            const k = child.dataset.key;
+            if (k) existingMap.set(k, child);
+        }
+        const fragment = document.createDocumentFragment();
+        const seen = new Set();
+        for (const node of tree) {
+            const key = node.id;
+            seen.add(key);
+            let el = existingMap.get(key);
+            if (el) {
+                updateSessionEl(el, node, depth);
+            } else {
+                el = createSessionEl(node, depth);
+                el.dataset.key = key;
+            }
+            const childContainer = el.querySelector('.session-children');
+            if (childContainer && node.children.length > 0) {
+                reconcileSessionTree(childContainer, node.children, depth + 1);
+            } else if (node.children.length > 0) {
+                const newChildContainer = h('div', { className: 'session-children ml-4' });
+                reconcileSessionTree(newChildContainer, node.children, depth + 1);
+                el.appendChild(newChildContainer);
+            } else {
+                const existingChildContainer = el.querySelector('.session-children');
+                if (existingChildContainer) existingChildContainer.remove();
+            }
+            fragment.appendChild(el);
+        }
+        for (const [key, el] of existingMap) {
+            if (!seen.has(key)) el.remove();
+        }
+        container.textContent = '';
+        container.appendChild(fragment);
+    }
+
+    function createSessionEl(sess, depth = 0) {
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
+        const isChild = depth > 0;
+        const indent = isChild ? 'ml-' + (depth * 3) : '';
         const div = h('div', {
+            className: `flex flex-col session-item ${indent}`.trim(),
+        });
+        const row = h('div', {
             className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`,
             'data-action': 'select-session', 'data-id': sess.id, title,
         });
-        div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
-        div.appendChild(h('span', { className: 'truncate flex-1', textContent: title }));
-        div.appendChild(h('button', {
+        row.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : (isChild ? 'bg-blue-400' : 'bg-gray-400 dark:bg-gray-600')}` }));
+        row.appendChild(h('span', { className: 'truncate flex-1', textContent: title }));
+        row.appendChild(h('button', {
             className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
             'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
         }));
+        div.appendChild(row);
+        if (sess.children && sess.children.length > 0) {
+            const childContainer = h('div', { className: 'session-children ml-4' });
+            div.appendChild(childContainer);
+        }
         return div;
     }
 
-    function updateSessionEl(el, sess) {
+    function updateSessionEl(el, sess, depth = 0) {
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
-        el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`;
-        el.title = title;
-        const dot = el.querySelector('span:first-child');
-        if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
-        const children = Array.from(el.children);
+        const isChild = depth > 0;
+        const row = el.querySelector('div[data-action="select-session"]');
+        if (!row) return;
+        row.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`;
+        row.title = title;
+        const dot = row.querySelector('span:first-child');
+        if (dot) dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : (isChild ? 'bg-blue-400' : 'bg-gray-400 dark:bg-gray-600')}`;
+        const children = Array.from(row.children);
         const titleEl = children[1];
         if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
         let delBtn = children[2];
@@ -1145,8 +1213,8 @@
                 className: 'text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0',
                 'data-action': 'delete-session', 'data-id': sess.id, textContent: '\u00d7',
             });
-            if (children[2]) el.insertBefore(delBtn, children[2]);
-            else el.appendChild(delBtn);
+            if (children[2]) row.insertBefore(delBtn, children[2]);
+            else row.appendChild(delBtn);
         }
     }
 
