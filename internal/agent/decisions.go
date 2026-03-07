@@ -131,7 +131,7 @@ func (dp *DecisionProcessor) processRestarts(ctx context.Context, instanceID, wo
 }
 
 func removeWorktree(workingDir, branchName string) error {
-	worktreePath := filepath.Join(workingDir, ".flock", "worktrees", branchName)
+	worktreePath := filepath.Join(memory.ResolveStateDir(workingDir), "worktrees", branchName)
 
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return nil

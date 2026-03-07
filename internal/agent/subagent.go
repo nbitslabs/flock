@@ -72,7 +72,7 @@ func CreateSubAgentSession(
 }
 
 func composeSubAgentPrompt(workingDir string, task *sqlc.Task) string {
-	worktreeDir := fmt.Sprintf("%s/.flock/worktrees/%s", workingDir, task.BranchName)
+	worktreeDir := fmt.Sprintf("%s/worktrees/%s", memory.ResolveStateDir(workingDir), task.BranchName)
 
 	return fmt.Sprintf(`You are an autonomous coding agent resolving a GitHub issue. Work independently to completion.
 
