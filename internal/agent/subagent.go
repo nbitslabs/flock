@@ -117,23 +117,25 @@ This project uses Nix for development tooling. To run commands with the devenv (
 - If you get stuck, describe the blocker in the progress file
 - When done, do NOT remove the worktree — flock manages cleanup
 `,
-		workingDir,
-		task.BranchName, worktreeDir,
-		worktreeDir,
-		worktreeDir,
-		task.IssueNumber,
-		task.Title,
-		task.IssueUrl,
-		task.IssueNumber,
-		task.IssueNumber, task.Title,
-		worktreeDir,
-		task.IssueNumber,
-		task.BranchName,
-		task.IssueNumber, task.Title, task.IssueUrl,
-		worktreeDir,
-		worktreeDir,
-		workingDir, task.IssueNumber,
-	)
+	workingDir,
+	task.BranchName, worktreeDir,
+	worktreeDir,
+	worktreeDir,
+	task.IssueNumber,
+	task.Title,
+	task.IssueUrl,
+	task.IssueNumber,
+	task.IssueNumber,
+	task.IssueNumber,
+	task.IssueNumber, task.Title,
+	worktreeDir,
+	task.IssueNumber,
+	task.BranchName,
+	task.IssueNumber, task.Title, task.IssueUrl,
+	worktreeDir,
+	worktreeDir,
+	workingDir, task.IssueNumber,
+)
 }
 
 // RestartSubAgent creates a fresh session for a stuck task.
