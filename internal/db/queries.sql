@@ -33,8 +33,8 @@ VALUES (?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpsertSession :exec
-INSERT INTO sessions (id, instance_id, title, status)
-VALUES (?, ?, ?, ?)
+INSERT INTO sessions (id, instance_id, parent_id, title, status)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   title = excluded.title,
   updated_at = datetime('now');
@@ -66,6 +66,12 @@ SELECT * FROM tasks WHERE instance_id = ? ORDER BY created_at DESC;
 
 -- name: ListActiveTasks :many
 SELECT * FROM tasks WHERE instance_id = ? AND status IN ('pending', 'active') ORDER BY created_at ASC;
+
+-- name: CountActiveTasksByInstance :one
+SELECT COUNT(*) FROM tasks WHERE instance_id = ? AND status IN ('pending', 'active');
+
+-- name: CountAllActiveTasks :one
+SELECT COUNT(*) FROM tasks WHERE status IN ('pending', 'active');
 
 -- name: UpdateTaskStatus :exec
 UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?;

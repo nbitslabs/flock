@@ -9,6 +9,28 @@ import (
 	"context"
 )
 
+const countActiveTasksByInstance = `-- name: CountActiveTasksByInstance :one
+SELECT COUNT(*) FROM tasks WHERE instance_id = ? AND status IN ('pending', 'active')
+`
+
+func (q *Queries) CountActiveTasksByInstance(ctx context.Context, instanceID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveTasksByInstance, instanceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAllActiveTasks = `-- name: CountAllActiveTasks :one
+SELECT COUNT(*) FROM tasks WHERE status IN ('pending', 'active')
+`
+
+func (q *Queries) CountAllActiveTasks(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAllActiveTasks)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createFlockAgentSession = `-- name: CreateFlockAgentSession :one
 
 INSERT INTO flock_agent_sessions (id, session_id, working_directory, status)
@@ -104,9 +126,9 @@ func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrche
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (id, instance_id, parent_id, title, status)
-VALUES (?, ?, '', ?, ?)
-RETURNING id, instance_id, parent_id, title, status, created_at, updated_at
+INSERT INTO sessions (id, instance_id, title, status)
+VALUES (?, ?, ?, ?)
+RETURNING id, instance_id, title, status, created_at, updated_at, parent_id
 `
 
 type CreateSessionParams struct {
@@ -127,11 +149,11 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	err := row.Scan(
 		&i.ID,
 		&i.InstanceID,
-		&i.ParentID,
 		&i.Title,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }
@@ -335,7 +357,7 @@ func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID str
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, instance_id, parent_id, title, status, created_at, updated_at FROM sessions WHERE id = ?
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE id = ?
 `
 
 func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
@@ -344,11 +366,11 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.InstanceID,
-		&i.ParentID,
 		&i.Title,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }
@@ -496,7 +518,7 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 }
 
 const listSessionsByInstance = `-- name: ListSessionsByInstance :many
-SELECT id, instance_id, parent_id, title, status, created_at, updated_at FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string) ([]Session, error) {
@@ -511,11 +533,11 @@ func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string)
 		if err := rows.Scan(
 			&i.ID,
 			&i.InstanceID,
-			&i.ParentID,
 			&i.Title,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ParentID,
 		); err != nil {
 			return nil, err
 		}
@@ -749,7 +771,6 @@ const upsertSession = `-- name: UpsertSession :exec
 INSERT INTO sessions (id, instance_id, parent_id, title, status)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  parent_id = excluded.parent_id,
   title = excluded.title,
   updated_at = datetime('now')
 `

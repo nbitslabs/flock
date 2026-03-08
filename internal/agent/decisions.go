@@ -21,10 +21,11 @@ type DecisionProcessor struct {
 	queries    *sqlc.Queries
 	workingDir string
 	dataDir    string
+	cfg        AgentConfig
 }
 
-func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workingDir, dataDir string) *DecisionProcessor {
-	return &DecisionProcessor{client: client, queries: queries, workingDir: workingDir, dataDir: dataDir}
+func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, workingDir, dataDir string, cfg AgentConfig) *DecisionProcessor {
+	return &DecisionProcessor{client: client, queries: queries, workingDir: workingDir, dataDir: dataDir, cfg: cfg}
 }
 
 // ProcessDecisions reads decision files from the working directory,
@@ -51,6 +52,35 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID, wo
 		}); err == nil {
 			log.Printf("agent: task for issue #%d already exists, skipping", d.IssueNumber)
 			continue
+		}
+
+		// Check session limits before creating a new task
+		if dp.cfg.MaxParallelSessions > 0 || dp.cfg.MaxParallelSessionsPerInst > 0 {
+			instanceCount, err := dp.queries.CountActiveTasksByInstance(ctx, instanceID)
+			if err != nil {
+				log.Printf("agent: failed to count instance active tasks: %v", err)
+				continue
+			}
+
+			if dp.cfg.MaxParallelSessionsPerInst > 0 && int(instanceCount) >= dp.cfg.MaxParallelSessionsPerInst {
+				log.Printf("agent: max parallel sessions per instance (%d) reached for %s, skipping issue #%d",
+					dp.cfg.MaxParallelSessionsPerInst, instanceID[:8], d.IssueNumber)
+				continue
+			}
+
+			if dp.cfg.MaxParallelSessions > 0 {
+				overallCount, err := dp.queries.CountAllActiveTasks(ctx)
+				if err != nil {
+					log.Printf("agent: failed to count overall active tasks: %v", err)
+					continue
+				}
+
+				if int(overallCount) >= dp.cfg.MaxParallelSessions {
+					log.Printf("agent: max parallel sessions (%d) reached, skipping issue #%d",
+						dp.cfg.MaxParallelSessions, d.IssueNumber)
+					continue
+				}
+			}
 		}
 
 		taskID := uuid.New().String()
