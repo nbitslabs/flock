@@ -175,9 +175,13 @@
     // =========================================================================
 
     async function api(method, path, body) {
-        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
         if (body) opts.body = JSON.stringify(body);
         const resp = await fetch(path, opts);
+        if (resp.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
         if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
         if (resp.status === 204) return null;
         return resp.json();

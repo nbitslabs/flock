@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flock - Login</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="h-full bg-white dark:bg-gray-950 flex items-center justify-center">
+    <div class="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-8 w-96 shadow-2xl">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Flock</h1>
+        <div id="error" class="hidden text-red-500 text-sm mb-4 text-center"></div>
+        <input id="username" type="text" placeholder="Username" class="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-gray-900 dark:text-gray-100 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input id="password" type="password" placeholder="Password" class="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-gray-900 dark:text-gray-100 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button id="btn-login" class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg transition-colors">Sign in</button>
+    </div>
+    <script>
+        (function() {
+            'use strict';
+            const usernameEl = document.getElementById('username');
+            const passwordEl = document.getElementById('password');
+            const btnLogin = document.getElementById('btn-login');
+            const errorEl = document.getElementById('error');
+
+            function showError(msg) {
+                errorEl.textContent = msg;
+                errorEl.classList.remove('hidden');
+            }
+
+            function hideError() {
+                errorEl.classList.add('hidden');
+            }
+
+            async function doLogin() {
+                hideError();
+                const username = usernameEl.value;
+                const password = passwordEl.value;
+                if (!username || !password) {
+                    showError('Please enter username and password');
+                    return;
+                }
+                btnLogin.disabled = true;
+                btnLogin.textContent = 'Signing in...';
+                try {
+                    const resp = await fetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'same-origin',
+                        body: JSON.stringify({ username, password })
+                    });
+                    if (!resp.ok) {
+                        const data = await resp.json();
+                        showError(data.error || 'Invalid credentials');
+                        return;
+                    }
+                    window.location.href = '/';
+                } catch (e) {
+                    showError('Connection error');
+                } finally {
+                    btnLogin.disabled = false;
+                    btnLogin.textContent = 'Sign in';
+                }
+            }
+
+            btnLogin.addEventListener('click', doLogin);
+            passwordEl.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') doLogin();
+            });
+            usernameEl.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') passwordEl.focus();
+            });
+        })();
+    </script>
+</body>
+</html>
