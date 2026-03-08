@@ -95,13 +95,15 @@ All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
 ## Workflow
 1. Read the issue details: `+"`gh issue view %d`"+`
 2. Understand the codebase and the issue
-3. Implement the fix/feature
-4. Run tests to verify
-5. Stage your changes with `+"`git add`"+`
-6. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, the list of staged files, and the worktree path (%s). It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
-7. Commit with the generated message
-8. Push the branch: `+"`git push -u origin %s`"+`
-9. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, the issue URL (%s), and the worktree path (%s). It will create a new PR or update an existing one and return the PR URL.
+3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and worktree path. It will write a plan to `+"`.flock/memory/progress/issue_%d.md`"+`.
+4. Read the plan from `+"`.flock/memory/progress/issue_%d.md`"+` to understand the proposed solution
+5. Implement the fix/feature based on the plan
+6. Run tests to verify
+7. Stage your changes with `+"`git add`"+`
+8. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, the list of staged files, and the worktree path (%s). It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
+9. Commit with the generated message
+10. Push the branch: `+"`git push -u origin %s`"+`
+11. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, the issue URL (%s), and the worktree path (%s). It will create a new PR or update an existing one and return the PR URL.
 
 ## Environment
 This project uses Nix for development tooling. To run commands with the devenv (compilers, linters, CLI utilities, etc.), wrap them with `+"`nix develop --impure -c bash -c \"<command>\"`"+`. For example: `+"`nix develop --impure -c bash -c \"go test ./...\"`"+`
