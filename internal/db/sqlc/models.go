@@ -4,6 +4,13 @@
 
 package sqlc
 
+type AuthSession struct {
+	Token     string
+	Username  string
+	CreatedAt string
+	ExpiresAt string
+}
+
 type FlockAgentSession struct {
 	ID               string
 	SessionID        string

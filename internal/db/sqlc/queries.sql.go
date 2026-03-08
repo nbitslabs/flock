@@ -31,6 +31,30 @@ func (q *Queries) CountAllActiveTasks(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createAuthSession = `-- name: CreateAuthSession :one
+
+INSERT INTO auth_sessions (token, username, expires_at)
+VALUES (?, ?, datetime('now', '+7 days'))
+RETURNING token, username, created_at, expires_at
+`
+
+type CreateAuthSessionParams struct {
+	Token    string
+	Username string
+}
+
+func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error) {
+	row := q.db.QueryRowContext(ctx, createAuthSession, arg.Token, arg.Username)
+	var i AuthSession
+	err := row.Scan(
+		&i.Token,
+		&i.Username,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const createFlockAgentSession = `-- name: CreateFlockAgentSession :one
 
 INSERT INTO flock_agent_sessions (id, session_id, working_directory, status)
@@ -206,6 +230,24 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 	return i, err
 }
 
+const deleteAuthSession = `-- name: DeleteAuthSession :exec
+DELETE FROM auth_sessions WHERE token = ?
+`
+
+func (q *Queries) DeleteAuthSession(ctx context.Context, token string) error {
+	_, err := q.db.ExecContext(ctx, deleteAuthSession, token)
+	return err
+}
+
+const deleteExpiredAuthSessions = `-- name: DeleteExpiredAuthSessions :exec
+DELETE FROM auth_sessions WHERE expires_at <= datetime('now')
+`
+
+func (q *Queries) DeleteExpiredAuthSessions(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredAuthSessions)
+	return err
+}
+
 const deleteInstance = `-- name: DeleteInstance :exec
 DELETE FROM instances WHERE id = ?
 `
@@ -287,6 +329,22 @@ func (q *Queries) GetActiveOrchestratorSession(ctx context.Context, instanceID s
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastHeartbeatAt,
+	)
+	return i, err
+}
+
+const getAuthSession = `-- name: GetAuthSession :one
+SELECT token, username, created_at, expires_at FROM auth_sessions WHERE token = ? AND expires_at > datetime('now')
+`
+
+func (q *Queries) GetAuthSession(ctx context.Context, token string) (AuthSession, error) {
+	row := q.db.QueryRowContext(ctx, getAuthSession, token)
+	var i AuthSession
+	err := row.Scan(
+		&i.Token,
+		&i.Username,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nbitslabs/flock/internal/agent"
+	"github.com/nbitslabs/flock/internal/auth"
 	"github.com/nbitslabs/flock/internal/config"
 	"github.com/nbitslabs/flock/internal/db"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
@@ -99,7 +100,18 @@ func main() {
 	manager.StartEventSubscription()
 
 	// Create HTTP server (reuse same client for flock agent - it uses the data dir as working dir)
-	srv := server.New(queries, manager, broker, harness, cfg.DataDir, cfg.BasePath, client)
+	authEnabled := cfg.Auth.Username != "" && cfg.Auth.Password != ""
+	var authPassHash string
+	if authEnabled {
+		hash, err := auth.HashPassword(cfg.Auth.Password)
+		if err != nil {
+			log.Fatal("failed to hash auth password:", err)
+		}
+		authPassHash = hash
+		log.Printf("authentication enabled for user: %s", cfg.Auth.Username)
+	}
+
+	srv := server.New(queries, manager, broker, harness, cfg.DataDir, cfg.BasePath, client, authEnabled, cfg.Auth.Username, authPassHash)
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: srv,

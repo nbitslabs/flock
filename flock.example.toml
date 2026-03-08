@@ -30,3 +30,8 @@ max_heartbeats_per_session = 20  # ~100 minutes
 
 # Timeout in seconds for waiting for the orchestrator to finish processing
 wait_for_idle_timeout_secs = 180  # 3 minutes
+
+# Authentication (optional - leave empty to disable)
+[auth]
+username = "admin"
+password = "changeme"

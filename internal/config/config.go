@@ -8,6 +8,12 @@ import (
 	"github.com/nbitslabs/flock/internal/agent"
 )
 
+// AuthConfig holds username/password authentication settings.
+type AuthConfig struct {
+	Username string `toml:"username"`
+	Password string `toml:"password"`
+}
+
 // Config holds all flock configuration.
 // Priority: CLI flag > ENV var > config file > default.
 type Config struct {
@@ -17,6 +23,7 @@ type Config struct {
 	DataDir     string            `toml:"data_dir"`
 	BasePath    string            `toml:"base_path"`
 	Agent       agent.AgentConfig `toml:"agent"`
+	Auth        AuthConfig        `toml:"auth"`
 }
 
 // Load reads configuration from the given TOML file path, then overlays
@@ -57,6 +64,12 @@ func Load(configPath string) *Config {
 	}
 	if os.Getenv("FLOCK_AGENT_ENABLED") == "true" {
 		cfg.Agent.Enabled = true
+	}
+	if v := os.Getenv("FLOCK_AUTH_USERNAME"); v != "" {
+		cfg.Auth.Username = v
+	}
+	if v := os.Getenv("FLOCK_AUTH_PASSWORD"); v != "" {
+		cfg.Auth.Password = v
 	}
 
 	if cfg.Agent.DataDir == "" {

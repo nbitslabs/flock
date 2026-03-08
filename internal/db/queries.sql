@@ -142,3 +142,19 @@ UPDATE flock_agent_sessions SET session_id = ?, status = ?, updated_at = datetim
 
 -- name: RetireFlockAgentSession :exec
 UPDATE flock_agent_sessions SET status = 'retired', updated_at = datetime('now') WHERE id = ?;
+
+-- Auth session queries
+
+-- name: CreateAuthSession :one
+INSERT INTO auth_sessions (token, username, expires_at)
+VALUES (?, ?, datetime('now', '+7 days'))
+RETURNING *;
+
+-- name: GetAuthSession :one
+SELECT * FROM auth_sessions WHERE token = ? AND expires_at > datetime('now');
+
+-- name: DeleteAuthSession :exec
+DELETE FROM auth_sessions WHERE token = ?;
+
+-- name: DeleteExpiredAuthSessions :exec
+DELETE FROM auth_sessions WHERE expires_at <= datetime('now');
