@@ -1,30 +1,37 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/nbitslabs/flock/internal/agent"
+	"github.com/nbitslabs/flock/internal/auth"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
 	"github.com/nbitslabs/flock/internal/opencode"
 	webfs "github.com/nbitslabs/flock/web"
 )
 
 type Server struct {
-	mux                *http.ServeMux
-	queries            *sqlc.Queries
-	manager            *opencode.Manager
-	broker             *SSEBroker
-	harness            *agent.Harness
-	dataDir            string
-	basePath           string
-	tmpl               *template.Template
-	flockAgentClient   *opencode.Client
+	mux              *http.ServeMux
+	queries          *sqlc.Queries
+	manager          *opencode.Manager
+	broker           *SSEBroker
+	harness          *agent.Harness
+	dataDir          string
+	basePath         string
+	tmpl             *template.Template
+	flockAgentClient *opencode.Client
+	authEnabled      bool
+	authUsername     string
+	authPassHash     string
 }
 
-func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir, basePath string, flockAgentClient *opencode.Client) *Server {
+func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, harness *agent.Harness, dataDir, basePath string, flockAgentClient *opencode.Client, authEnabled bool, authUsername, authPassHash string) *Server {
 	s := &Server{
 		mux:              http.NewServeMux(),
 		queries:          queries,
@@ -34,6 +41,9 @@ func New(queries *sqlc.Queries, manager *opencode.Manager, broker *SSEBroker, ha
 		dataDir:          dataDir,
 		basePath:         basePath,
 		flockAgentClient: flockAgentClient,
+		authEnabled:      authEnabled,
+		authUsername:     authUsername,
+		authPassHash:     authPassHash,
 	}
 	s.setupRoutes()
 	return s
@@ -53,6 +63,11 @@ func (s *Server) setupRoutes() {
 		log.Fatal("failed to get static sub-fs:", err)
 	}
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+
+	// Auth routes
+	s.mux.HandleFunc("GET /login", s.handleLoginPage)
+	s.mux.HandleFunc("POST /api/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/logout", s.handleLogout)
 
 	// Web UI
 	s.mux.HandleFunc("GET /", s.handleIndex)
@@ -98,9 +113,88 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.tmpl.ExecuteTemplate(w, "index.html", nil)
 }
 
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	s.tmpl.ExecuteTemplate(w, "login.html", nil)
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.authEnabled {
+		http.Error(w, `{"error":"auth not configured"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Username != s.authUsername || !auth.CheckPassword(s.authPassHash, req.Password) {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	token := auth.GenerateToken()
+	_, err := s.queries.CreateAuthSession(r.Context(), sqlc.CreateAuthSessionParams{
+		Token:    token,
+		Username: req.Username,
+	})
+	if err != nil {
+		log.Printf("failed to create auth session: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "flock_session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   604800,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("flock_session")
+	if err == nil && cookie.Value != "" {
+		s.queries.DeleteAuthSession(r.Context(), cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:   "flock_session",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) isValidSession(ctx context.Context, token string) bool {
+	if token == "" {
+		return false
+	}
+	session, err := s.queries.GetAuthSession(ctx, token)
+	return err == nil && session.Token == token
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// CORS middleware
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	if r.Method == "OPTIONS" {
@@ -108,7 +202,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Logging middleware
+	if s.authEnabled {
+		path := r.URL.Path
+		if !strings.HasPrefix(path, "/static/") && path != "/login" && path != "/api/login" && path != "/api/logout" {
+			cookie, err := r.Cookie("flock_session")
+			if err != nil || !s.isValidSession(r.Context(), cookie.Value) {
+				if strings.HasPrefix(path, "/api/") {
+					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				} else {
+					http.Redirect(w, r, "/login", http.StatusFound)
+				}
+				return
+			}
+		}
+	}
+
 	log.Printf("%s %s", r.Method, r.URL.Path)
 	s.mux.ServeHTTP(w, r)
 }
