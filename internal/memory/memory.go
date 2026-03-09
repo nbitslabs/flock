@@ -11,24 +11,50 @@ import (
 )
 
 const (
-	flockDir      = ".flock"
-	memoryDir     = ".flock/memory"
-	progressDir   = ".flock/memory/progress"
-	heartbeatFile = "HEARTBEAT.md"
-	memoryFile    = "MEMORY.md"
-	newTasksFile  = "new_tasks.json"
-	restartFile   = "restart_tasks.json"
-	completedFile = "completed_tasks.json"
+	flockDir        = ".flock"
+	memoryDir       = ".flock/memory"
+	instancesDir    = ".flock/memory/instances"
+	progressDir     = ".flock/memory/progress"
+	heartbeatFile   = "HEARTBEAT.md"
+	memoryFile      = "MEMORY.md"
+	worktreesDir    = ".flock/worktrees"
+	newTasksFile    = "new_tasks.json"
+	restartFile     = "restart_tasks.json"
+	completedFile   = "completed_tasks.json"
+	reflectionDir   = ".flock/memory/reflection"
 )
 
 // ResolveStateDir returns the state directory path.
-// If the given path already ends with ".flock", it is returned as-is.
-// Otherwise, ".flock" is appended to the path.
 func ResolveStateDir(dataDir string) string {
 	if strings.HasSuffix(dataDir, flockDir) {
 		return dataDir
 	}
 	return filepath.Join(dataDir, flockDir)
+}
+
+// InstanceMemoryPath returns the path to instance-specific memory directory.
+func InstanceMemoryPath(dataDir, instanceID string) string {
+	return filepath.Join(ResolveStateDir(dataDir), "memory", "instances", instanceID)
+}
+
+// InstanceProgressPath returns the path to instance-specific progress directory.
+func InstanceProgressPath(dataDir, instanceID string) string {
+	return filepath.Join(InstanceMemoryPath(dataDir, instanceID), "progress")
+}
+
+// InstanceWorktreePath returns the global worktree path for an instance/branch.
+func InstanceWorktreePath(dataDir, instanceID, branchName string) string {
+	return filepath.Join(ResolveStateDir(dataDir), "worktrees", instanceID, branchName)
+}
+
+// GlobalWorktreesPath returns the global worktrees directory.
+func GlobalWorktreesPath(dataDir string) string {
+	return filepath.Join(ResolveStateDir(dataDir), "worktrees")
+}
+
+// ReflectionPath returns the path to the reflection directory.
+func ReflectionPath(dataDir string) string {
+	return filepath.Join(ResolveStateDir(dataDir), "memory", "reflection")
 }
 
 // NewTaskDecision represents a new task from the orchestrator's decision file.
@@ -51,15 +77,15 @@ type CompletedTaskDecision struct {
 	Reason string `json:"reason"`
 }
 
-// EnsureLayout creates the .flock directory structure and default files if they
-// don't already exist. workingDir is the instance's working directory.
-// It detects if workingDir already ends with ".flock" to avoid nesting.
-func EnsureLayout(workingDir string) error {
-	stateDir := ResolveStateDir(workingDir)
+// EnsureLayout creates the .flock directory structure and default files in the data directory.
+// It creates the global flock structure and instance-specific directories.
+func EnsureLayout(dataDir string) error {
+	stateDir := ResolveStateDir(dataDir)
 	dirs := []string{
 		stateDir,
 		filepath.Join(stateDir, "memory"),
-		filepath.Join(stateDir, "memory", "progress"),
+		filepath.Join(stateDir, "memory", "instances"),
+		filepath.Join(stateDir, "worktrees"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -67,15 +93,7 @@ func EnsureLayout(workingDir string) error {
 		}
 	}
 
-	// Write default HEARTBEAT.md if missing
-	hbPath := filepath.Join(stateDir, heartbeatFile)
-	if _, err := os.Stat(hbPath); os.IsNotExist(err) {
-		if err := os.WriteFile(hbPath, []byte(defaultHeartbeat()), 0o644); err != nil {
-			return fmt.Errorf("write heartbeat: %w", err)
-		}
-	}
-
-	// Write default MEMORY.md if missing
+	// Write default global MEMORY.md if missing
 	memPath := filepath.Join(stateDir, "memory", memoryFile)
 	if _, err := os.Stat(memPath); os.IsNotExist(err) {
 		if err := os.WriteFile(memPath, []byte(defaultMemory()), 0o644); err != nil {
@@ -86,27 +104,71 @@ func EnsureLayout(workingDir string) error {
 	return nil
 }
 
-// ReadHeartbeat returns the contents of .flock/HEARTBEAT.md.
-func ReadHeartbeat(workingDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(ResolveStateDir(workingDir), heartbeatFile))
+// EnsureInstanceLayout creates the instance-specific directory structure and default files.
+// instanceID is used to create instance-specific directories within dataDir.
+func EnsureInstanceLayout(dataDir, instanceID string) error {
+	stateDir := ResolveStateDir(dataDir)
+	instanceMemDir := filepath.Join(stateDir, "memory", "instances", instanceID)
+	dirs := []string{
+		instanceMemDir,
+		filepath.Join(instanceMemDir, "progress"),
+		filepath.Join(stateDir, "worktrees", instanceID),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return fmt.Errorf("mkdir %s: %w", d, err)
+		}
+	}
+
+	// Write default HEARTBEAT.md if missing
+	hbPath := filepath.Join(instanceMemDir, heartbeatFile)
+	if _, err := os.Stat(hbPath); os.IsNotExist(err) {
+		if err := os.WriteFile(hbPath, []byte(defaultHeartbeat()), 0o644); err != nil {
+			return fmt.Errorf("write heartbeat: %w", err)
+		}
+	}
+
+	// Write default MEMORY.md if missing
+	memPath := filepath.Join(instanceMemDir, memoryFile)
+	if _, err := os.Stat(memPath); os.IsNotExist(err) {
+		if err := os.WriteFile(memPath, []byte(defaultMemory()), 0o644); err != nil {
+			return fmt.Errorf("write memory: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// ReadHeartbeat returns the contents of instance-specific HEARTBEAT.md.
+func ReadHeartbeat(dataDir, instanceID string) (string, error) {
+	hbPath := filepath.Join(InstanceMemoryPath(dataDir, instanceID), heartbeatFile)
+	data, err := os.ReadFile(hbPath)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-// WriteHeartbeat writes content to .flock/HEARTBEAT.md.
-func WriteHeartbeat(workingDir, content string) error {
-	return os.WriteFile(filepath.Join(ResolveStateDir(workingDir), heartbeatFile), []byte(content), 0o644)
+// WriteHeartbeat writes content to instance-specific HEARTBEAT.md.
+func WriteHeartbeat(dataDir, instanceID, content string) error {
+	hbPath := filepath.Join(InstanceMemoryPath(dataDir, instanceID), heartbeatFile)
+	return os.WriteFile(hbPath, []byte(content), 0o644)
 }
 
-// ReadInstanceMemory returns the contents of .flock/memory/MEMORY.md.
-func ReadInstanceMemory(workingDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(ResolveStateDir(workingDir), "memory", memoryFile))
+// ReadInstanceMemory returns the contents of instance-specific MEMORY.md.
+func ReadInstanceMemory(dataDir, instanceID string) (string, error) {
+	memPath := filepath.Join(InstanceMemoryPath(dataDir, instanceID), memoryFile)
+	data, err := os.ReadFile(memPath)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// WriteInstanceMemory writes content to instance-specific MEMORY.md.
+func WriteInstanceMemory(dataDir, instanceID, content string) error {
+	memPath := filepath.Join(InstanceMemoryPath(dataDir, instanceID), memoryFile)
+	return os.WriteFile(memPath, []byte(content), 0o644)
 }
 
 // ReadGlobalMemory returns the global memory file from the data directory.
@@ -131,9 +193,9 @@ func WriteGlobalMemory(dataDir, content string) error {
 	return os.WriteFile(filepath.Join(dir, memoryFile), []byte(content), 0o644)
 }
 
-// ReadNewTasks reads and parses .flock/memory/new_tasks.json.
-func ReadNewTasks(workingDir string) ([]NewTaskDecision, error) {
-	path := filepath.Join(ResolveStateDir(workingDir), "memory", newTasksFile)
+// ReadNewTasks reads and parses the instance's new_tasks.json.
+func ReadNewTasks(dataDir, instanceID string) ([]NewTaskDecision, error) {
+	path := filepath.Join(InstanceMemoryPath(dataDir, instanceID), newTasksFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -148,9 +210,9 @@ func ReadNewTasks(workingDir string) ([]NewTaskDecision, error) {
 	return tasks, nil
 }
 
-// ReadRestartTasks reads and parses .flock/memory/restart_tasks.json.
-func ReadRestartTasks(workingDir string) ([]RestartTaskDecision, error) {
-	path := filepath.Join(ResolveStateDir(workingDir), "memory", restartFile)
+// ReadRestartTasks reads and parses the instance's restart_tasks.json.
+func ReadRestartTasks(dataDir, instanceID string) ([]RestartTaskDecision, error) {
+	path := filepath.Join(InstanceMemoryPath(dataDir, instanceID), restartFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -165,9 +227,9 @@ func ReadRestartTasks(workingDir string) ([]RestartTaskDecision, error) {
 	return tasks, nil
 }
 
-// ReadCompletedTasks reads and parses .flock/memory/completed_tasks.json.
-func ReadCompletedTasks(workingDir string) ([]CompletedTaskDecision, error) {
-	path := filepath.Join(ResolveStateDir(workingDir), "memory", completedFile)
+// ReadCompletedTasks reads and parses the instance's completed_tasks.json.
+func ReadCompletedTasks(dataDir, instanceID string) ([]CompletedTaskDecision, error) {
+	path := filepath.Join(InstanceMemoryPath(dataDir, instanceID), completedFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -183,10 +245,10 @@ func ReadCompletedTasks(workingDir string) ([]CompletedTaskDecision, error) {
 }
 
 // ClearDecisionFiles removes the decision files after processing.
-func ClearDecisionFiles(workingDir string) {
-	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", newTasksFile))
-	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", restartFile))
-	os.Remove(filepath.Join(ResolveStateDir(workingDir), "memory", completedFile))
+func ClearDecisionFiles(dataDir, instanceID string) {
+	os.Remove(filepath.Join(InstanceMemoryPath(dataDir, instanceID), newTasksFile))
+	os.Remove(filepath.Join(InstanceMemoryPath(dataDir, instanceID), restartFile))
+	os.Remove(filepath.Join(InstanceMemoryPath(dataDir, instanceID), completedFile))
 }
 
 // TemplateHash returns the SHA256 hash of the embedded heartbeat template.
@@ -197,14 +259,15 @@ func TemplateHash() string {
 
 // HeartbeatUpgradePrompt returns a prompt for OpenCode to merge the existing
 // heartbeat with the new template.
-func HeartbeatUpgradePrompt(workingDir string) (string, error) {
-	existingHeartbeat, err := ReadHeartbeat(workingDir)
+func HeartbeatUpgradePrompt(dataDir, instanceID string) (string, error) {
+	existingHeartbeat, err := ReadHeartbeat(dataDir, instanceID)
 	if err != nil {
 		return "", fmt.Errorf("read existing heartbeat: %w", err)
 	}
 
 	newHeartbeat := defaultHeartbeat()
 
+	hbPath := filepath.Join(InstanceMemoryPath(dataDir, instanceID), heartbeatFile)
 	prompt := fmt.Sprintf(`The heartbeat template has been updated. Your task is to merge the existing heartbeat file with the new template, preserving any custom modifications while incorporating new changes.
 
 ## Existing Heartbeat (preserve custom modifications):
@@ -222,7 +285,7 @@ func HeartbeatUpgradePrompt(workingDir string) (string, error) {
    - Removing any instructions that are no longer relevant
 4. Write the merged result to: %s
 
-Only write the merged content to the file. Do not add any other files.`, existingHeartbeat, newHeartbeat, filepath.Join(ResolveStateDir(workingDir), heartbeatFile))
+Only write the merged content to the file. Do not add any other files.`, existingHeartbeat, newHeartbeat, hbPath)
 
 	return prompt, nil
 }

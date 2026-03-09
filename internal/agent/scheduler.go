@@ -13,7 +13,7 @@ import (
 // Scheduler runs the heartbeat loop for a single instance.
 type Scheduler struct {
 	instanceID   string
-	workingDir   string
+	dataDir      string
 	cfg          AgentConfig
 	orchestrator *Orchestrator
 	processor    *DecisionProcessor
@@ -23,7 +23,7 @@ type Scheduler struct {
 }
 
 func NewScheduler(
-	instanceID, workingDir string,
+	instanceID, dataDir string,
 	cfg AgentConfig,
 	orchestrator *Orchestrator,
 	processor *DecisionProcessor,
@@ -32,7 +32,7 @@ func NewScheduler(
 ) *Scheduler {
 	return &Scheduler{
 		instanceID:   instanceID,
-		workingDir:   workingDir,
+		dataDir:      dataDir,
 		cfg:          cfg,
 		orchestrator: orchestrator,
 		processor:    processor,
@@ -97,7 +97,7 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 	}
 
 	// 2. Process decision files (even if SendHeartbeat errored)
-	s.processor.ProcessDecisions(ctx, s.instanceID, s.workingDir)
+	s.processor.ProcessDecisions(ctx, s.instanceID)
 
 	// 3. Check for stuck tasks and mark them
 	s.checkStuckTasks(ctx)

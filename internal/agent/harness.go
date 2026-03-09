@@ -85,19 +85,24 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 		return
 	}
 
-	// Ensure .flock directory layout
-	if err := memory.EnsureLayout(workingDir); err != nil {
-		log.Printf("agent: failed to ensure layout for %s: %v", truncID(instanceID), err)
+	// Ensure global .flock directory layout
+	if err := memory.EnsureLayout(h.dataDir); err != nil {
+		log.Printf("agent: failed to ensure global layout: %v", err)
+	}
+
+	// Ensure instance-specific .flock directory layout
+	if err := memory.EnsureInstanceLayout(h.dataDir, instanceID); err != nil {
+		log.Printf("agent: failed to ensure instance layout for %s: %v", truncID(instanceID), err)
 	}
 
 	// Check if heartbeat needs upgrade
-	if err := h.upgradeHeartbeatIfNeeded(instanceID, workingDir); err != nil {
+	if err := h.upgradeHeartbeatIfNeeded(instanceID); err != nil {
 		log.Printf("agent: heartbeat upgrade failed for %s: %v", truncID(instanceID), err)
 	}
 
-	orch := NewOrchestrator(h.client, h.queries, instanceID, workingDir, h.cfg, h.subscribeFn)
-	proc := NewDecisionProcessor(h.client, h.queries, workingDir, h.dataDir, h.cfg)
-	sched := NewScheduler(instanceID, workingDir, h.cfg, orch, proc, h.queries, h.client)
+	orch := NewOrchestrator(h.client, h.queries, instanceID, h.dataDir, h.cfg, h.subscribeFn)
+	proc := NewDecisionProcessor(h.client, h.queries, h.dataDir, instanceID, h.cfg)
+	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, h.queries, h.client)
 	sched.Start(h.ctx)
 
 	h.schedulers[instanceID] = sched
@@ -184,7 +189,7 @@ func (h *Harness) Enabled() bool {
 
 // upgradeHeartbeatIfNeeded checks if the heartbeat template has been updated
 // and upgrades it if necessary using OpenCode to merge the changes.
-func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error {
+func (h *Harness) upgradeHeartbeatIfNeeded(instanceID string) error {
 	ctx := context.Background()
 	currentHash := memory.TemplateHash()
 
@@ -212,10 +217,16 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, workingDir string) error 
 
 	log.Printf("agent: heartbeat template changed for instance %s, upgrading", truncID(instanceID))
 
-	prompt, err := memory.HeartbeatUpgradePrompt(workingDir)
+	prompt, err := memory.HeartbeatUpgradePrompt(h.dataDir, instanceID)
 	if err != nil {
 		return fmt.Errorf("generate upgrade prompt: %w", err)
 	}
+
+	instance, err := h.queries.GetInstance(ctx, instanceID)
+	if err != nil {
+		return fmt.Errorf("get instance: %w", err)
+	}
+	workingDir := instance.WorkingDirectory
 
 	session, err := h.client.CreateSession(ctx, workingDir)
 	if err != nil {

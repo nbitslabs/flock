@@ -28,7 +28,7 @@ Do this **before** writing the decision files so the issue author gets prompt fe
 
 ### 5. Write Decision Files
 
-#### For completed tasks, write `.flock/memory/completed_tasks.json`:
+#### For completed tasks, write `<dataDir>/.flock/memory/instances/<instanceID>/completed_tasks.json`:
 ```json
 [
   {
@@ -39,7 +39,7 @@ Do this **before** writing the decision files so the issue author gets prompt fe
 ```
 The `reason` should be `"issue closed"` or `"pr merged"` depending on which condition was met.
 
-#### For new issues, write `.flock/memory/new_tasks.json`:
+#### For new issues, write `<dataDir>/.flock/memory/instances/<instanceID>/new_tasks.json`:
 ```json
 [
   {
@@ -51,7 +51,7 @@ The `reason` should be `"issue closed"` or `"pr merged"` depending on which cond
 ]
 ```
 
-#### For tasks that need restarting, write `.flock/memory/restart_tasks.json`:
+#### For tasks that need restarting, write `<dataDir>/.flock/memory/instances/<instanceID>/restart_tasks.json`:
 ```json
 [
   {
@@ -61,8 +61,23 @@ The `reason` should be `"issue closed"` or `"pr merged"` depending on which cond
 ]
 ```
 
-### 6. Update Memory
-Write any relevant observations to `.flock/memory/MEMORY.md` to maintain context across sessions.
+### 6. Trigger Self-Reflection
+
+For each **completed task**, invoke the `@flock-self-reflect` subagent to update memory:
+- Send it the instance ID, issue number, issue title, session ID, and data directory path
+- Wait for the reflection to complete before continuing
+
+Example:
+```
+Invoke @flock-self-reflect with:
+- Instance: {instanceID}
+- Issue: #{number}: {title}
+- Session: {sessionID}
+- DataDir: {dataDir}
+```
+
+### 7. Update Memory
+Write any relevant observations to `<dataDir>/.flock/memory/instances/<instanceID>/MEMORY.md` to maintain context across sessions.
 
 ## Important Rules
 - Only create tasks for issues assigned to you (`@me`)

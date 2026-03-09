@@ -18,6 +18,7 @@ func CreateSubAgentSession(
 	client *opencode.Client,
 	queries *sqlc.Queries,
 	instanceID string,
+	dataDir string,
 	workingDir string,
 	task *sqlc.Task,
 ) error {
@@ -54,7 +55,7 @@ func CreateSubAgentSession(
 
 	log.Printf("agent: created sub-agent session %s for issue #%d", session.ID[:8], task.IssueNumber)
 
-	prompt := composeSubAgentPrompt(workingDir, task)
+	prompt := composeSubAgentPrompt(dataDir, instanceID, workingDir, task)
 
 	// Send message in a goroutine so it doesn't block the heartbeat loop.
 	// OpenCode's message endpoint blocks until the AI finishes processing.
@@ -71,8 +72,9 @@ func CreateSubAgentSession(
 	return nil
 }
 
-func composeSubAgentPrompt(workingDir string, task *sqlc.Task) string {
-	worktreeDir := fmt.Sprintf("%s/worktrees/%s", memory.ResolveStateDir(workingDir), task.BranchName)
+func composeSubAgentPrompt(dataDir, instanceID, workingDir string, task *sqlc.Task) string {
+	worktreeDir := memory.InstanceWorktreePath(dataDir, instanceID, task.BranchName)
+	progressPath := memory.InstanceProgressPath(dataDir, instanceID)
 
 	return fmt.Sprintf(`You are an autonomous coding agent resolving a GitHub issue. Work independently to completion.
 
@@ -80,6 +82,7 @@ func composeSubAgentPrompt(workingDir string, task *sqlc.Task) string {
 Each sub-agent works in its own git worktree to avoid interfering with other agents. Run these commands first:
 
 `+"```bash"+`
+mkdir -p %s
 cd %s
 git worktree add -b %s %s
 cd %s
@@ -95,8 +98,8 @@ All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
 ## Workflow
 1. Read the issue details: `+"`gh issue view %d`"+`
 2. Understand the codebase and the issue
-3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and worktree path. It will write a plan to `+"`.flock/memory/progress/issue_%d.md`"+`.
-4. Read the plan from `+"`.flock/memory/progress/issue_%d.md`"+` to understand the proposed solution
+3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and worktree path. It will write a plan to `+"`%s/progress/issue_%d.md`"+`.
+4. Read the plan from `+"`%s/progress/issue_%d.md`"+` to understand the proposed solution
 5. Implement the fix/feature based on the plan
 6. Run tests to verify
 7. Stage your changes with `+"`git add`"+`
@@ -113,29 +116,30 @@ This project uses Nix for development tooling. To run commands with the devenv (
 - Always work inside the worktree: `+"`%s`"+`
 - Write clean, tested code
 - If tests fail, fix them before proceeding
-- Write progress to `+"`%s/.flock/memory/progress/issue_%d.md`"+`
+- Write progress to `+"`%s/progress/issue_%d.md`"+`
 - If you get stuck, describe the blocker in the progress file
 - When done, do NOT remove the worktree — flock manages cleanup
 `,
-	workingDir,
-	task.BranchName, worktreeDir,
-	worktreeDir,
-	worktreeDir,
-	task.IssueNumber,
-	task.Title,
-	task.IssueUrl,
-	task.IssueNumber,
-	task.IssueNumber,
-	task.IssueNumber,
-	task.IssueNumber, task.Title,
-	worktreeDir,
-	task.IssueNumber,
-	task.BranchName,
-	task.IssueNumber, task.Title, task.IssueUrl,
-	worktreeDir,
-	worktreeDir,
-	workingDir, task.IssueNumber,
-)
+		worktreeDir,
+		worktreeDir,
+		task.BranchName, workingDir,
+		worktreeDir,
+		worktreeDir,
+		task.IssueNumber,
+		task.Title,
+		task.IssueUrl,
+		task.IssueNumber,
+		progressPath, task.IssueNumber,
+		progressPath, task.IssueNumber,
+		task.IssueNumber, task.Title,
+		worktreeDir,
+		task.IssueNumber,
+		task.BranchName,
+		task.IssueNumber, task.Title, task.IssueUrl,
+		worktreeDir,
+		worktreeDir,
+		progressPath, task.IssueNumber,
+	)
 }
 
 // RestartSubAgent creates a fresh session for a stuck task.
@@ -144,12 +148,13 @@ func RestartSubAgent(
 	client *opencode.Client,
 	queries *sqlc.Queries,
 	instanceID string,
+	dataDir string,
 	workingDir string,
 	task *sqlc.Task,
 	reason string,
 ) error {
 	// Read existing progress if any
-	progressContent, _ := memory.ReadInstanceMemory(workingDir)
+	progressContent, _ := memory.ReadInstanceMemory(dataDir, instanceID)
 
 	session, err := client.CreateSession(ctx, workingDir)
 	if err != nil {
@@ -179,7 +184,7 @@ func RestartSubAgent(
 		ID:     task.ID,
 	})
 
-	prompt := composeSubAgentPrompt(workingDir, task)
+	prompt := composeSubAgentPrompt(dataDir, instanceID, workingDir, task)
 	prompt += fmt.Sprintf("\n## Previous Attempt\nThe previous session was stuck. Reason: %s\n", reason)
 	prompt += fmt.Sprintf("\n## Note\nThe worktree and branch may already exist from the previous attempt. If `git worktree add` fails because it already exists, just `cd` into the worktree directory and continue from where the previous agent left off.\n")
 	if progressContent != "" {
