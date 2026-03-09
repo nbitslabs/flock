@@ -127,6 +127,10 @@ WHERE instance_id = ? AND status = 'active'
 ORDER BY last_heartbeat_at DESC
 LIMIT 1;
 
+-- name: EnsureFlockAgentInstance :exec
+INSERT OR IGNORE INTO instances (id, pid, port, working_directory, status, org, repo)
+VALUES ('flock-agent', 0, 0, '', 'running', '', '');
+
 -- Flock agent session queries
 
 -- name: CreateFlockAgentSession :one

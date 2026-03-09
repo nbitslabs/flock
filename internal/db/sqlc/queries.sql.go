@@ -296,6 +296,16 @@ func (q *Queries) DeleteTasksByInstance(ctx context.Context, instanceID string) 
 	return err
 }
 
+const ensureFlockAgentInstance = `-- name: EnsureFlockAgentInstance :exec
+INSERT OR IGNORE INTO instances (id, pid, port, working_directory, status, org, repo)
+VALUES ('flock-agent', 0, 0, '', 'running', '', '')
+`
+
+func (q *Queries) EnsureFlockAgentInstance(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, ensureFlockAgentInstance)
+	return err
+}
+
 const getActiveFlockAgentSession = `-- name: GetActiveFlockAgentSession :one
 SELECT id, session_id, working_directory, status, created_at, updated_at FROM flock_agent_sessions WHERE status = 'active' LIMIT 1
 `

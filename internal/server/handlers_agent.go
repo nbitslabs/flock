@@ -161,6 +161,10 @@ func (s *Server) ensureFlockAgentSession(ctx context.Context) (*sqlc.Session, er
 		sessionID = uuid.New().String()
 	}
 
+	if err := s.queries.EnsureFlockAgentInstance(ctx); err != nil {
+		return nil, fmt.Errorf("ensure flock-agent instance: %w", err)
+	}
+
 	newSession, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
 		ID:         sessionID,
 		InstanceID: flockAgentInstanceID,
