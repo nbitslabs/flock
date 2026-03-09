@@ -198,3 +198,25 @@ func (m *Manager) List() []*Instance {
 	}
 	return result
 }
+
+const FlockAgentInstanceID = "flock-agent"
+
+func (m *Manager) GetFlockAgentInstance(dataDir string) *Instance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if inst, ok := m.instances[FlockAgentInstanceID]; ok {
+		return inst
+	}
+
+	inst := &Instance{
+		ID:               FlockAgentInstanceID,
+		WorkingDirectory: dataDir,
+		Org:              "",
+		Repo:             "",
+		Status:           "running",
+		Client:           m.client,
+	}
+	m.instances[FlockAgentInstanceID] = inst
+	return inst
+}

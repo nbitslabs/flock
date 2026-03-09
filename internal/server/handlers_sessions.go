@@ -10,27 +10,36 @@ import (
 	"github.com/nbitslabs/flock/internal/opencode"
 )
 
+func (s *Server) getInstance(instanceID string) *opencode.Instance {
+	if instanceID == opencode.FlockAgentInstanceID {
+		return s.manager.GetFlockAgentInstance(s.dataDir)
+	}
+	inst, ok := s.manager.Get(instanceID)
+	if !ok {
+		return nil
+	}
+	return inst
+}
+
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
-	// Verify instance exists
-	if _, err := s.queries.GetInstance(r.Context(), instanceID); err != nil {
-		http.Error(w, "instance not found", http.StatusNotFound)
-		return
+
+	if instanceID != opencode.FlockAgentInstanceID {
+		if _, err := s.queries.GetInstance(r.Context(), instanceID); err != nil {
+			http.Error(w, "instance not found", http.StatusNotFound)
+			return
+		}
 	}
 
-	// Try to get sessions from OpenCode
-	inst, ok := s.manager.Get(instanceID)
-	if ok && inst.Client != nil {
+	inst := s.getInstance(instanceID)
+	if inst != nil && inst.Client != nil {
 		sessions, err := inst.Client.ListSessions(r.Context(), inst.WorkingDirectory)
 		if err == nil {
-			// Build set of session IDs in this directory
 			ownIDs := make(map[string]struct{}, len(sessions))
 			for _, sess := range sessions {
 				ownIDs[sess.ID] = struct{}{}
 			}
 
-			// Filter out sessions whose parent belongs to a different instance
-			// (e.g. sub-agent sessions created in flock's dir by an MCP session)
 			var result []opencode.Session
 			for _, sess := range sessions {
 				if sess.ParentID != "" {
@@ -41,9 +50,6 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 				result = append(result, sess)
 			}
 
-			// Include children of our sessions that live in other directories
-			// (e.g. @flock-commit-writer sessions spawned by our sub-agent)
-			// Snapshot length to avoid iterating over appended children.
 			n := len(result)
 			for i := 0; i < n; i++ {
 				children, err := inst.Client.ListSessionChildren(r.Context(), result[i].ID)
@@ -72,7 +78,6 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to list sessions from opencode: %v, falling back to DB", err)
 	}
 
-	// Fallback to DB
 	sessions, err := s.queries.ListSessionsByInstance(r.Context(), instanceID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -83,8 +88,8 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
-	inst, ok := s.manager.Get(instanceID)
-	if !ok || inst.Client == nil {
+	inst := s.getInstance(instanceID)
+	if inst == nil || inst.Client == nil {
 		http.Error(w, "instance not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -95,7 +100,6 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store in our DB too
 	sessionID := ocSession.ID
 	if sessionID == "" {
 		sessionID = uuid.New().String()
@@ -119,10 +123,8 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to get from OpenCode
-	inst, ok := s.manager.Get(session.InstanceID)
-	if ok && inst.Client != nil {
-		// Return DB session enriched with instance info
+	inst := s.getInstance(session.InstanceID)
+	if inst != nil && inst.Client != nil {
 		writeJSON(w, map[string]any{
 			"id":          session.ID,
 			"instance_id": session.InstanceID,
@@ -145,8 +147,8 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if !ok || inst.Client == nil {
+	inst := s.getInstance(session.InstanceID)
+	if inst == nil || inst.Client == nil {
 		http.Error(w, "instance not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -177,8 +179,8 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if !ok || inst.Client == nil {
+	inst := s.getInstance(session.InstanceID)
+	if inst == nil || inst.Client == nil {
 		http.Error(w, "instance not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -205,8 +207,8 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if ok && inst.Client != nil {
+	inst := s.getInstance(session.InstanceID)
+	if inst != nil && inst.Client != nil {
 		if err := inst.Client.DeleteSession(r.Context(), sessionID); err != nil {
 			log.Printf("failed to delete session from opencode: %v", err)
 		}
