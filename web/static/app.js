@@ -20,6 +20,7 @@
         selectedSessionId: null,
         sessionBusy: false,
         sessionBusyTool: null,
+        sessionQuestion: false,
         eventSource: null,
         _instanceHash: '',
         _lastSentText: null,  // track user message to filter streaming echoes
@@ -434,6 +435,12 @@
             else if (field === 'toolName' || field === 'args') part.type = 'tool-invocation';
             else if (field === 'reasoning') part.type = 'reasoning';
         }
+        // Detect question tool
+        if (field === 'toolName' && delta === 'question') {
+            store.sessionQuestion = true;
+            updateInputState();
+            renderSessions();
+        }
         renderStreamingArea();
     }
 
@@ -445,6 +452,13 @@
         const messageID = part.messageID;
         const existing = store.streamingParts.get(id);
         store.streamingParts.set(id, { ...part, _messageID: messageID || (existing && existing._messageID) });
+
+        // Detect question tool
+        if (part.toolName === 'question' || part.tool === 'question') {
+            store.sessionQuestion = true;
+            updateInputState();
+            renderSessions();
+        }
 
         // Also attach the part to the settled message so it survives
         // when streaming parts are cleared (especially important for user messages
@@ -509,7 +523,9 @@
     function handleSessionIdle() {
         store.sessionBusy = false;
         store.sessionBusyTool = null;
+        store.sessionQuestion = false;
         updateInputState(); updateHeaderStatus();
+        renderSessions();
         // Full reload from API — session.idle means processing is complete,
         // so the API has all committed messages.
         if (store.viewingFlockAgent) loadFlockAgentMessages();
@@ -1161,6 +1177,7 @@
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
+        const hasQuestion = sel && store.sessionQuestion;
         const indent = depth * 12;
         const isSubAgent = depth > 0;
         const div = h('div', {
@@ -1170,6 +1187,8 @@
         div.style.paddingLeft = `${8 + indent}px`;
         if (isSubAgent) {
             div.appendChild(h('span', { className: 'text-xs text-purple-400 dark:text-purple-500', textContent: '\u21b3' }));
+        } else if (hasQuestion) {
+            div.appendChild(h('span', { className: 'w-1.5 h-1.5 rounded-full flex-shrink-0 bg-red-500 animate-pulse' }));
         } else {
             div.appendChild(h('span', { className: `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}` }));
         }
@@ -1185,6 +1204,7 @@
         const sel = sess.id === store.selectedSessionId;
         const title = sess.title || 'Untitled';
         const busy = sel && store.sessionBusy;
+        const hasQuestion = sel && store.sessionQuestion;
         const isSubAgent = depth > 0;
         el.style.paddingLeft = `${8 + depth * 12}px`;
         el.className = `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${sel ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`;
@@ -1194,6 +1214,8 @@
             if (isSubAgent) {
                 dot.className = 'text-xs text-purple-400 dark:text-purple-500';
                 dot.textContent = '\u21b3';
+            } else if (hasQuestion) {
+                dot.className = 'w-1.5 h-1.5 rounded-full flex-shrink-0 bg-red-500 animate-pulse';
             } else {
                 dot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${busy ? 'bg-yellow-400 animate-pulse' : 'bg-gray-400 dark:bg-gray-600'}`;
             }
@@ -1294,7 +1316,7 @@
         store.selectedSessionId = id;
         store.viewingFlockAgent = false;
         store.messages.clear(); store.streamingParts.clear();
-        store.sessionBusy = false; store.sessionBusyTool = null;
+        store.sessionBusy = false; store.sessionBusyTool = null; store.sessionQuestion = false;
         renderSessions(); renderMessages(); updateHeader(); updateHeaderStatus(); updateInputState();
         document.getElementById('input-area').classList.remove('hidden');
         loadMessages(id);
@@ -1322,7 +1344,9 @@
         const el = document.getElementById('header-status');
         if (!el) return;
         if (!store.selectedSessionId) { el.innerHTML = ''; return; }
-        if (store.sessionBusy) {
+        if (store.sessionQuestion) {
+            el.innerHTML = '<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse inline-block"></span><span>Question pending</span>';
+        } else if (store.sessionBusy) {
             const t = store.sessionBusyTool ? ` \u00b7 ${esc(store.sessionBusyTool)}` : '';
             el.innerHTML = `<span class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse inline-block"></span><span>Busy${t}</span>`;
         } else {
@@ -1334,9 +1358,11 @@
         const btn = document.getElementById('btn-send');
         const input = document.getElementById('message-input');
         if (!btn || !input) return;
-        btn.disabled = store.sessionBusy;
-        btn.textContent = store.sessionBusy ? 'Working\u2026' : 'Send';
-        input.disabled = store.sessionBusy;
+        // Allow input when session is busy ONLY if there's a question pending
+        const allowInput = !store.sessionBusy || store.sessionQuestion;
+        btn.disabled = !allowInput;
+        btn.textContent = store.sessionQuestion ? 'Answer' : (store.sessionBusy ? 'Working\u2026' : 'Send');
+        input.disabled = !allowInput;
         if (!store.sessionBusy) input.focus();
     }
 
