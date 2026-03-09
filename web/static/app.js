@@ -21,6 +21,8 @@
         sessionBusy: false,
         sessionBusyTool: null,
         sessionQuestion: false,
+        sessionQuestionData: null,
+        sessionQuestionRequestID: null,
         eventSource: null,
         _instanceHash: '',
         _lastSentText: null,  // track user message to filter streaming echoes
@@ -423,6 +425,7 @@
             case 'session.status': handleSessionStatus(props); break;
             case 'session.updated': handleSessionUpdated(props); break;
             case 'session.idle': handleSessionIdle(); break;
+            case 'question.asked': handleQuestionAsked(props); break;
             default: console.debug('SSE:', type, props);
         }
     }
@@ -462,6 +465,13 @@
         // Detect question tool
         if (part.toolName === 'question' || part.tool === 'question') {
             store.sessionQuestion = true;
+            // Store question data from args
+            const args = part.args || part.state?.input;
+            if (args) {
+                try {
+                    store.sessionQuestionData = typeof args === 'string' ? JSON.parse(args) : args;
+                } catch { store.sessionQuestionData = null; }
+            }
             updateInputState();
             renderSessions();
         }
@@ -530,12 +540,24 @@
         store.sessionBusy = false;
         store.sessionBusyTool = null;
         store.sessionQuestion = false;
+        store.sessionQuestionData = null;
+        store.sessionQuestionRequestID = null;
         updateInputState(); updateHeaderStatus();
         renderSessions();
         // Full reload from API — session.idle means processing is complete,
         // so the API has all committed messages.
         if (store.viewingFlockAgent) loadFlockAgentMessages();
         else if (store.selectedSessionId) loadMessages(store.selectedSessionId, false);
+    }
+
+    function handleQuestionAsked(props) {
+        store.sessionQuestion = true;
+        store.sessionQuestionRequestID = props.id || null;
+        store.sessionQuestionData = { questions: props.questions || [] };
+        updateInputState();
+        updateHeaderStatus();
+        renderSessions();
+        renderStreamingArea();
     }
 
     // =========================================================================
@@ -545,11 +567,21 @@
     function doSend() {
         const input = document.getElementById('message-input');
         const content = input.value.trim();
-        if (!content || store.sessionBusy) return;
+        if (!content || (store.sessionBusy && !store.sessionQuestion)) return;
+        // If a question is pending, answer it via the question reply API
+        if (store.sessionQuestion && store.sessionQuestionRequestID) {
+            input.value = '';
+            input.style.height = 'auto';
+            answerQuestion(content);
+            return;
+        }
         if (store.viewingFlockAgent) {
             input.value = '';
             input.style.height = 'auto';
             store._lastSentText = content;
+            store.sessionQuestion = false;
+            store.sessionQuestionData = null;
+            store.sessionQuestionRequestID = null;
             const optId = '_opt_' + Date.now();
             store.messages.set(optId, {
                 info: { id: optId, role: 'user', time: { created: Date.now() } },
@@ -557,6 +589,7 @@
                 _optimistic: true,
             });
             renderMessages();
+            renderStreamingArea();
             scrollToBottom();
             store.sessionBusy = true;
             updateInputState();
@@ -568,6 +601,9 @@
         input.style.height = 'auto';
 
         store._lastSentText = content;
+        store.sessionQuestion = false;
+        store.sessionQuestionData = null;
+        store.sessionQuestionRequestID = null;
 
         const optId = '_opt_' + Date.now();
         store.messages.set(optId, {
@@ -804,6 +840,15 @@
         const input = state.input;
         const output = state.output || state.metadata?.output || '';
 
+        // Render question tool as interactive UI
+        if (toolName === 'question' && input) {
+            const data = typeof input === 'string' ? (() => { try { return JSON.parse(input); } catch { return null; } })() : input;
+            if (data) {
+                const answered = status === 'completed' || !!output || !!part._answered;
+                return renderQuestionUI(data, answered);
+            }
+        }
+
         return buildToolDetails(toolName, status, title, input, output);
     }
 
@@ -811,11 +856,106 @@
     function renderToolInvPart(part) {
         const toolName = part.toolName || part.name || 'tool';
         const status = part.state || part.toolState || 'running';
-        const title = '';
         const input = part.args;
         const output = part.result;
 
-        return buildToolDetails(toolName, status, title, input, output);
+        // Render question tool as interactive UI
+        if (toolName === 'question' && input) {
+            const data = typeof input === 'string' ? (() => { try { return JSON.parse(input); } catch { return null; } })() : input;
+            if (data) {
+                const answered = status === 'completed' || !!output || !!part._answered;
+                return renderQuestionUI(data, answered);
+            }
+        }
+
+        return buildToolDetails(toolName, status, '', input, output);
+    }
+
+    /** Render interactive question UI */
+    function renderQuestionUI(data, answered) {
+        const container = h('div', { className: 'my-2 p-3 rounded-lg border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30 space-y-3' });
+
+        const questions = data.questions || [data];
+        for (const q of questions) {
+            const questionText = q.question || q.text || '';
+            if (questionText) {
+                const header = h('div', { className: 'flex items-center gap-2' });
+                if (q.header) {
+                    header.appendChild(h('span', { className: 'text-xs font-medium px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300', textContent: q.header }));
+                }
+                if (!answered) {
+                    header.appendChild(h('span', { className: 'w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0' }));
+                }
+                container.appendChild(header);
+                container.appendChild(h('p', { className: 'text-sm font-medium text-gray-800 dark:text-gray-200', textContent: questionText }));
+            }
+
+            const options = q.options || [];
+            if (options.length && !answered) {
+                const optionsDiv = h('div', { className: 'flex flex-wrap gap-2' });
+                for (const opt of options) {
+                    const label = opt.label || opt;
+                    const desc = opt.description || '';
+                    const btn = h('button', {
+                        className: 'px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 transition-colors cursor-pointer',
+                        title: desc,
+                        textContent: label,
+                        onClick: function () { answerQuestion(label); },
+                    });
+                    optionsDiv.appendChild(btn);
+                }
+                container.appendChild(optionsDiv);
+            }
+        }
+
+        if (answered) {
+            container.className = 'my-2 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 space-y-3';
+        }
+
+        return container;
+    }
+
+    /** Mark all question tool parts as answered so re-renders show them without buttons */
+    function markQuestionsAnswered() {
+        for (const [, part] of store.streamingParts) {
+            if ((part.toolName || part.tool) === 'question') part._answered = true;
+        }
+        for (const [, msg] of store.messages) {
+            if (!msg.parts) continue;
+            for (const part of msg.parts) {
+                if ((part.toolName || part.tool) === 'question') part._answered = true;
+            }
+        }
+    }
+
+    /** Send an answer to a pending question via OpenCode's question reply API */
+    async function answerQuestion(text) {
+        const requestID = store.sessionQuestionRequestID;
+        if (!requestID) {
+            // Fallback: no requestID available, send as regular message
+            markQuestionsAnswered();
+            const input = document.getElementById('message-input');
+            if (input) { input.value = text; doSend(); }
+            return;
+        }
+
+        markQuestionsAnswered();
+        store.sessionQuestion = false;
+        store.sessionQuestionData = null;
+        store.sessionQuestionRequestID = null;
+        updateInputState();
+        updateHeaderStatus();
+        renderSessions();
+        renderStreamingArea();
+
+        try {
+            // Each answer is an array of strings (selected labels).
+            // One answer per question — we only support single-question for now.
+            await api('POST', `/api/questions/${requestID}/reply`, { answers: [[text]] });
+        } catch (e) {
+            console.error('answerQuestion:', e);
+            alert('Failed to send answer: ' + e.message);
+        }
     }
 
     /** Shared tool rendering — compact Claude-Code style */
@@ -968,6 +1108,20 @@
         // Tool calls
         for (const part of tools) {
             const toolName = part.toolName || part.tool || part.name || 'tool';
+            // Render question tool as interactive UI
+            if (toolName === 'question') {
+                const rawArgs = part.args || part.state?.input;
+                if (rawArgs) {
+                    let data = rawArgs;
+                    if (typeof data === 'string') { try { data = JSON.parse(data); } catch { data = null; } }
+                    if (data) {
+                        const answered = (part.state?.status || part.state) === 'completed' || !!part.result || !!part.state?.output || !!part._answered;
+                        const el = renderQuestionUI(data, answered);
+                        if (el) bubble.appendChild(el);
+                        continue;
+                    }
+                }
+            }
             const el = buildToolDetails(toolName, part.state?.status || part.state || 'running', '', part.args || part.state?.input, part.result || part.state?.output);
             if (el) bubble.appendChild(el);
         }
@@ -1322,7 +1476,7 @@
         store.selectedSessionId = id;
         store.viewingFlockAgent = false;
         store.messages.clear(); store.streamingParts.clear();
-        store.sessionBusy = false; store.sessionBusyTool = null; store.sessionQuestion = false;
+        store.sessionBusy = false; store.sessionBusyTool = null; store.sessionQuestion = false; store.sessionQuestionData = null; store.sessionQuestionRequestID = null;
         renderSessions(); renderMessages(); updateHeader(); updateHeaderStatus(); updateInputState();
         document.getElementById('input-area').classList.remove('hidden');
         loadMessages(id);

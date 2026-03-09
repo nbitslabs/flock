@@ -192,6 +192,27 @@ func (c *Client) SendMessage(ctx context.Context, sessionID string, content stri
 	return nil
 }
 
+// ReplyToQuestion answers a pending question in OpenCode.
+// Each answer is an array of strings (selected option labels).
+func (c *Client) ReplyToQuestion(ctx context.Context, requestID string, answers [][]string) error {
+	body, _ := json.Marshal(QuestionReplyRequest{Answers: answers})
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/question/"+requestID+"/reply", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("reply to question: status %d: %s", resp.StatusCode, respBody)
+	}
+	return nil
+}
+
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/session/"+sessionID, nil)
 	if err != nil {

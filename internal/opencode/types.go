@@ -55,3 +55,7 @@ type SendPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }
+
+type QuestionReplyRequest struct {
+	Answers [][]string `json:"answers"`
+}

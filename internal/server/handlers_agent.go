@@ -310,3 +310,28 @@ func (s *Server) handleFlockAgentEvents(w http.ResponseWriter, r *http.Request) 
 
 	s.broker.ServeHTTP(w, r, session.ID)
 }
+
+// handleReplyToQuestion proxies a question reply to the OpenCode server.
+func (s *Server) handleReplyToQuestion(w http.ResponseWriter, r *http.Request) {
+	requestID := r.PathValue("requestID")
+	if requestID == "" {
+		http.Error(w, "missing requestID", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Answers [][]string `json:"answers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.flockAgentClient.ReplyToQuestion(r.Context(), requestID, req.Answers); err != nil {
+		log.Printf("failed to reply to question %s: %v", requestID, err)
+		http.Error(w, "failed to reply to question", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]bool{"ok": true})
+}
