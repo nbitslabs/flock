@@ -262,6 +262,7 @@ func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Re
 }
 
 // handleGetFlockAgentMessages returns messages for the Flock agent session.
+// Delegates to unified handler for DRY code.
 func (s *Server) handleGetFlockAgentMessages(w http.ResponseWriter, r *http.Request) {
 	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
@@ -269,16 +270,11 @@ func (s *Server) handleGetFlockAgentMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	messages, err := s.flockAgentClient.GetMessages(r.Context(), session.SessionID)
-	if err != nil {
-		log.Printf("failed to get flock agent messages: %v", err)
-		http.Error(w, "failed to get messages", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, messages)
+	s.handleGetMessagesWithID(w, r, session.SessionID)
 }
 
 // handleSendFlockAgentMessage sends a message to the Flock agent session.
+// Delegates to unified handler for DRY code.
 func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Request) {
 	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
@@ -286,23 +282,11 @@ func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var req sendMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if err := s.flockAgentClient.SendMessage(r.Context(), session.SessionID, req.Content); err != nil {
-		log.Printf("failed to send flock agent message: %v", err)
-		http.Error(w, "failed to send message", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]string{"status": "sent"})
+	s.handleSendMessageWithID(w, r, session.SessionID)
 }
 
 // handleFlockAgentEvents returns SSE events for the Flock agent session.
+// Delegates to unified handler for DRY code.
 func (s *Server) handleFlockAgentEvents(w http.ResponseWriter, r *http.Request) {
 	session, err := s.ensureFlockAgentSession(r.Context())
 	if err != nil {
@@ -310,5 +294,5 @@ func (s *Server) handleFlockAgentEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.broker.ServeHTTP(w, r, session.SessionID)
+	s.handleSessionEventsWithID(w, r, session.SessionID)
 }

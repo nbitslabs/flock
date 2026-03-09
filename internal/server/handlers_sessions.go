@@ -196,6 +196,59 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
+	s.handleSessionEventsWithID(w, r, sessionID)
+}
+
+func (s *Server) handleGetMessagesWithID(w http.ResponseWriter, r *http.Request, sessionID string) {
+	session, err := s.queries.GetSession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	inst := s.getInstance(session.InstanceID)
+	if inst == nil || inst.Client == nil {
+		http.Error(w, "instance not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	messages, err := inst.Client.GetMessages(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, messages)
+}
+
+func (s *Server) handleSendMessageWithID(w http.ResponseWriter, r *http.Request, sessionID string) {
+	session, err := s.queries.GetSession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	var req sendMessageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	inst := s.getInstance(session.InstanceID)
+	if inst == nil || inst.Client == nil {
+		http.Error(w, "instance not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := inst.Client.SendMessage(r.Context(), sessionID, req.Content); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]string{"status": "sent"})
+}
+
+func (s *Server) handleSessionEventsWithID(w http.ResponseWriter, r *http.Request, sessionID string) {
 	s.broker.ServeHTTP(w, r, sessionID)
 }
 
