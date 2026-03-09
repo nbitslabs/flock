@@ -355,7 +355,9 @@
 
     async function loadFlockAgentMessages() {
         try {
-            const msgs = await api('GET', '/api/flock-agent/messages') || [];
+            const sessionId = store.flockAgentSessionId;
+            if (!sessionId) return;
+            const msgs = await api('GET', `/api/sessions/${sessionId}/messages`) || [];
             store.messages.clear();
             for (const m of msgs) {
                 if (!m.info?.id) continue;
@@ -369,7 +371,9 @@
 
     async function sendFlockAgentMessage(content) {
         try {
-            await api('POST', '/api/flock-agent/messages', { content });
+            const sessionId = store.flockAgentSessionId;
+            if (!sessionId) return;
+            await api('POST', `/api/sessions/${sessionId}/messages`, { content });
         } catch (e) {
             console.error('sendFlockAgentMessage:', e);
             alert('Failed to send message: ' + e.message);
@@ -380,7 +384,9 @@
 
     function connectFlockAgentSSE() {
         closeEventSource();
-        const es = new EventSource('/api/flock-agent/events');
+        const sessionId = store.flockAgentSessionId;
+        if (!sessionId) return;
+        const es = new EventSource(`/api/sessions/${sessionId}/events`);
         store.eventSource = es;
         es.onmessage = function (e) {
             try { routeEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ }

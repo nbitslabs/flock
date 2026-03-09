@@ -10,6 +10,19 @@ import (
 	"github.com/nbitslabs/flock/internal/opencode"
 )
 
+const flockAgentInstanceID = "flock-agent"
+
+func (s *Server) getClientForSession(session *sqlc.Session) *opencode.Client {
+	if session.InstanceID == flockAgentInstanceID {
+		return s.flockAgentClient
+	}
+	inst, ok := s.manager.Get(session.InstanceID)
+	if !ok {
+		return nil
+	}
+	return inst.Client
+}
+
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
 	// Verify instance exists
@@ -119,10 +132,8 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to get from OpenCode
-	inst, ok := s.manager.Get(session.InstanceID)
-	if ok && inst.Client != nil {
-		// Return DB session enriched with instance info
+	client := s.getClientForSession(&session)
+	if client != nil {
 		writeJSON(w, map[string]any{
 			"id":          session.ID,
 			"instance_id": session.InstanceID,
@@ -145,13 +156,13 @@ func (s *Server) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if !ok || inst.Client == nil {
+	client := s.getClientForSession(&session)
+	if client == nil {
 		http.Error(w, "instance not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	messages, err := inst.Client.GetMessages(r.Context(), sessionID)
+	messages, err := client.GetMessages(r.Context(), sessionID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -177,13 +188,13 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if !ok || inst.Client == nil {
+	client := s.getClientForSession(&session)
+	if client == nil {
 		http.Error(w, "instance not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	if err := inst.Client.SendMessage(r.Context(), sessionID, req.Content); err != nil {
+	if err := client.SendMessage(r.Context(), sessionID, req.Content); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -205,9 +216,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, ok := s.manager.Get(session.InstanceID)
-	if ok && inst.Client != nil {
-		if err := inst.Client.DeleteSession(r.Context(), sessionID); err != nil {
+	client := s.getClientForSession(&session)
+	if client != nil {
+		if err := client.DeleteSession(r.Context(), sessionID); err != nil {
 			log.Printf("failed to delete session from opencode: %v", err)
 		}
 	}
