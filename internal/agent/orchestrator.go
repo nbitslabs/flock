@@ -107,7 +107,7 @@ func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.Orc
 	// Bootstrap with memory context
 	bootstrapMsg := o.composeBootstrapMessage()
 	if bootstrapMsg != "" {
-		if err := o.client.SendMessage(ctx, session.ID, bootstrapMsg); err != nil {
+		if err := o.client.SendMessage(ctx, session.ID, bootstrapMsg, ""); err != nil {
 			log.Printf("agent: failed to send bootstrap message: %v", err)
 		} else {
 			// Wait for bootstrap to complete
@@ -173,7 +173,7 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 
 	msg := o.composeHeartbeatMessage(ctx)
 
-	if err := o.client.SendMessage(ctx, orch.SessionID, msg); err != nil {
+	if err := o.client.SendMessage(ctx, orch.SessionID, msg, ""); err != nil {
 		// Session may have been deleted externally — retire and recreate
 		log.Printf("agent: heartbeat send failed, retiring stale session %s: %v", truncID(orch.SessionID), err)
 		o.queries.RetireOrchestratorSession(ctx, orch.ID)

@@ -275,7 +275,7 @@ func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := s.flockAgentClient.SendMessage(r.Context(), session.ID, req.Content); err != nil {
+	if err := s.flockAgentClient.SendMessage(r.Context(), session.ID, req.Content, ""); err != nil {
 		log.Printf("failed to send flock agent message: %v", err)
 		http.Error(w, "failed to send message", http.StatusInternalServerError)
 		return
