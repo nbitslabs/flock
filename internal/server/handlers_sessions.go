@@ -246,6 +246,19 @@ func (s *Server) handleGetModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	connected := make(map[string]bool, len(providers.Connected))
+	for _, id := range providers.Connected {
+		connected[id] = true
+	}
+	filtered := make([]opencode.Provider, 0, len(providers.Connected))
+	for _, p := range providers.All {
+		if connected[p.ID] {
+			filtered = append(filtered, p)
+		}
+	}
+	providers.All = filtered
+
 	writeJSON(w, providers)
 }
 

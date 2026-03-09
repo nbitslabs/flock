@@ -572,7 +572,7 @@ func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Tas
 }
 
 const listInstances = `-- name: ListInstances :many
-SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo FROM instances ORDER BY created_at DESC
+SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo FROM instances WHERE id != 'flock-agent' ORDER BY created_at DESC
 `
 
 func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {

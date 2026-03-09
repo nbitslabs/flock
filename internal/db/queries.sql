@@ -1,5 +1,5 @@
 -- name: ListInstances :many
-SELECT * FROM instances ORDER BY created_at DESC;
+SELECT * FROM instances WHERE id != 'flock-agent' ORDER BY created_at DESC;
 
 -- name: GetInstance :one
 SELECT * FROM instances WHERE id = ?;
