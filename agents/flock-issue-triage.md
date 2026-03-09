@@ -17,13 +17,22 @@ You will receive:
 2. **Issue URL**: The full URL to the issue
 3. **Issue title**: The title of the issue
 4. **Worktree path**: The path to the git worktree where you should analyze the codebase
+5. **Data directory**: Path to flock's data directory
+6. **Instance ID**: The flock instance ID
 
 ## Your Process
 
-1. **Read the issue**: Use `gh issue view <number>` to get full issue details including description, comments, and any relevant context
-2. **Explore the codebase**: Understand the relevant code paths that need to be modified
-3. **Research**: Check for related issues, PRs, or documentation that might help understand the context
-4. **Create a plan**: Write a detailed implementation plan to the progress file
+1. **Read Relevant Memory**: Before analyzing the issue, search for relevant context:
+   - Read `{dataDir}/.flock/memory/MEMORY.md` for global context
+   - Read `{dataDir}/.flock/memory/instances/{instanceID}/MEMORY.md` for instance context
+   - Use grep to search for related topics: `grep -r "relevant_keyword" {dataDir}/.flock/memory/topics/`
+   
+   Use this context to inform your analysis.
+
+2. **Read the issue**: Use `gh issue view <number>` to get full issue details including description, comments, and any relevant context
+3. **Explore the codebase**: Understand the relevant code paths that need to be modified
+4. **Research**: Check for related issues, PRs, or documentation that might help understand the context
+5. **Create a plan**: Write a detailed implementation plan to the progress file
 
 ## Output Format
 

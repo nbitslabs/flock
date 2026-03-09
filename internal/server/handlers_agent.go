@@ -16,13 +16,8 @@ import (
 // handleGetHeartbeat returns the HEARTBEAT.md for an instance.
 func (s *Server) handleGetHeartbeat(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
-	inst, ok := s.manager.Get(instanceID)
-	if !ok {
-		http.Error(w, "instance not found", http.StatusNotFound)
-		return
-	}
 
-	content, err := memory.ReadHeartbeat(inst.WorkingDirectory)
+	content, err := memory.ReadHeartbeat(s.dataDir, instanceID)
 	if err != nil {
 		http.Error(w, "failed to read heartbeat: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -35,11 +30,6 @@ func (s *Server) handleGetHeartbeat(w http.ResponseWriter, r *http.Request) {
 // handlePutHeartbeat updates the HEARTBEAT.md for an instance.
 func (s *Server) handlePutHeartbeat(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
-	inst, ok := s.manager.Get(instanceID)
-	if !ok {
-		http.Error(w, "instance not found", http.StatusNotFound)
-		return
-	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -47,7 +37,7 @@ func (s *Server) handlePutHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := memory.WriteHeartbeat(inst.WorkingDirectory, string(body)); err != nil {
+	if err := memory.WriteHeartbeat(s.dataDir, instanceID, string(body)); err != nil {
 		http.Error(w, "failed to write heartbeat: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -99,13 +89,8 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 // handleGetInstanceMemory returns .flock/memory/MEMORY.md for an instance.
 func (s *Server) handleGetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
-	inst, ok := s.manager.Get(instanceID)
-	if !ok {
-		http.Error(w, "instance not found", http.StatusNotFound)
-		return
-	}
 
-	content, err := memory.ReadInstanceMemory(inst.WorkingDirectory)
+	content, err := memory.ReadInstanceMemory(s.dataDir, instanceID)
 	if err != nil {
 		http.Error(w, "failed to read memory: "+err.Error(), http.StatusInternalServerError)
 		return

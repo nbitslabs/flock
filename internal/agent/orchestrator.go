@@ -20,6 +20,7 @@ type Orchestrator struct {
 	queries    *sqlc.Queries
 	instanceID string
 	workingDir string
+	dataDir    string
 	cfg        AgentConfig
 	// subscribeFn returns a channel of raw SSE events and an unsubscribe func.
 	subscribeFn func(sessionID string) (<-chan string, func())
@@ -28,15 +29,16 @@ type Orchestrator struct {
 func NewOrchestrator(
 	client *opencode.Client,
 	queries *sqlc.Queries,
-	instanceID, workingDir string,
+	instanceID, dataDir string,
 	cfg AgentConfig,
 	subscribeFn func(sessionID string) (<-chan string, func()),
 ) *Orchestrator {
+	// We'll get workingDir from the database when needed
 	return &Orchestrator{
 		client:      client,
 		queries:     queries,
 		instanceID:  instanceID,
-		workingDir:  workingDir,
+		dataDir:     dataDir,
 		cfg:         cfg,
 		subscribeFn: subscribeFn,
 	}
@@ -72,7 +74,14 @@ func (o *Orchestrator) EnsureSession(ctx context.Context) (*sqlc.OrchestratorSes
 }
 
 func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.OrchestratorSession, error) {
-	session, err := o.client.CreateSession(ctx, o.workingDir)
+	// Get workingDir from the database
+	instance, err := o.queries.GetInstance(ctx, o.instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("get instance: %w", err)
+	}
+	workingDir := instance.WorkingDirectory
+
+	session, err := o.client.CreateSession(ctx, workingDir)
 	if err != nil {
 		return nil, fmt.Errorf("create orchestrator session: %w", err)
 	}
@@ -114,14 +123,14 @@ func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.Orc
 func (o *Orchestrator) composeBootstrapMessage() string {
 	var sb strings.Builder
 
-	heartbeat, err := memory.ReadHeartbeat(o.workingDir)
+	heartbeat, err := memory.ReadHeartbeat(o.dataDir, o.instanceID)
 	if err == nil && heartbeat != "" {
 		sb.WriteString("# Heartbeat Instructions\n\n")
 		sb.WriteString(heartbeat)
 		sb.WriteString("\n\n")
 	}
 
-	instMemory, err := memory.ReadInstanceMemory(o.workingDir)
+	instMemory, err := memory.ReadInstanceMemory(o.dataDir, o.instanceID)
 	if err == nil && instMemory != "" {
 		sb.WriteString("# Instance Memory\n\n")
 		sb.WriteString(instMemory)
@@ -132,9 +141,15 @@ func (o *Orchestrator) composeBootstrapMessage() string {
 		return ""
 	}
 
+	instance, err := o.queries.GetInstance(context.Background(), o.instanceID)
+	workingDir := ""
+	if err == nil {
+		workingDir = instance.WorkingDirectory
+	}
+
 	return fmt.Sprintf("You are the orchestrator AI. Read and internalize these instructions. "+
 		"You will receive periodic heartbeat messages. Your working directory is: %s\n\n%s"+
-		"Acknowledge that you understand your role.", o.workingDir, sb.String())
+		"Acknowledge that you understand your role.", workingDir, sb.String())
 }
 
 // SendHeartbeat sends a heartbeat message to the orchestrator session and
@@ -180,8 +195,14 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 }
 
 func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
+	instance, err := o.queries.GetInstance(ctx, o.instanceID)
+	workingDir := ""
+	if err == nil {
+		workingDir = instance.WorkingDirectory
+	}
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\n\n", o.workingDir))
+	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\n\n", workingDir))
 
 	// Include tracked tasks
 	tasks, err := o.queries.ListActiveTasks(ctx, o.instanceID)
@@ -219,11 +240,12 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	sb.WriteString("1. Run `gh issue list --assignee=@me --state=open --json number,url,title`\n")
 	sb.WriteString("2. For each active/stuck task above, check if its issue is closed: `gh issue view <number> --json state -q .state`\n")
 	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged: `gh pr view <pr_url> --json state -q .state`\n")
-	sb.WriteString("4. Write `.flock/memory/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
-	sb.WriteString("5. Compare issue list with active tasks and write `.flock/memory/new_tasks.json` for new issues\n")
-	sb.WriteString("6. Write `.flock/memory/restart_tasks.json` for stuck tasks needing restart\n")
-	sb.WriteString("7. For each completed task, remove its worktree: `git worktree remove <worktree_path>` (path is `.flock/worktrees/<branch_name>`)\n")
-	sb.WriteString("8. Update `.flock/memory/MEMORY.md` with any observations\n")
+	sb.WriteString("4. Write `<dataDir>/.flock/memory/instances/<instanceID>/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
+	sb.WriteString("5. Compare issue list with active tasks and write `<dataDir>/.flock/memory/instances/<instanceID>/new_tasks.json` for new issues\n")
+	sb.WriteString("6. Write `<dataDir>/.flock/memory/instances/<instanceID>/restart_tasks.json` for stuck tasks needing restart\n")
+	sb.WriteString("7. For each completed task, remove its worktree: `git worktree remove <worktree_path>` (path is `<dataDir>/.flock/worktrees/<instanceID>/<branch_name>`)\n")
+	sb.WriteString("8. Update `<dataDir>/.flock/memory/instances/<instanceID>/MEMORY.md` with any observations\n")
+	sb.WriteString("9. For each completed task, invoke the `@flock-self-reflect` subagent to update memory (see HEARTBEAT.md for details)\n")
 
 	return sb.String()
 }
