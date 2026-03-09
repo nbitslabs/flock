@@ -156,18 +156,16 @@ func (s *Server) handleGetAgentStatus(w http.ResponseWriter, r *http.Request) {
 
 // ensureFlockAgentSession returns a valid flock agent session, creating a new
 // one if the existing session no longer exists in OpenCode.
-func (s *Server) ensureFlockAgentSession(ctx context.Context) (*sqlc.FlockAgentSession, error) {
-	session, err := s.queries.GetActiveFlockAgentSession(ctx)
+func (s *Server) ensureFlockAgentSession(ctx context.Context) (*sqlc.Session, error) {
+	session, err := s.queries.GetActiveFlockAgentSessionByInstance(ctx)
 	if err == nil {
-		// Verify the OpenCode session still exists
-		if _, err := s.flockAgentClient.GetSession(ctx, session.SessionID); err == nil {
+		if _, err := s.flockAgentClient.GetSession(ctx, session.ID); err == nil {
 			return &session, nil
 		}
-		log.Printf("flock agent session %s no longer exists in opencode, recreating", session.SessionID[:12])
-		s.queries.RetireFlockAgentSession(ctx, session.ID)
+		log.Printf("flock agent session %s no longer exists in opencode, recreating", session.ID[:12])
+		s.queries.DeleteSession(ctx, session.ID)
 	}
 
-	// Create a new session
 	ocSession, err := s.flockAgentClient.CreateSession(ctx, s.dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("create flock agent session: %w", err)
@@ -178,17 +176,17 @@ func (s *Server) ensureFlockAgentSession(ctx context.Context) (*sqlc.FlockAgentS
 		sessionID = uuid.New().String()
 	}
 
-	flockAgentID := uuid.New().String()
-	newSession, err := s.queries.CreateFlockAgentSession(ctx, sqlc.CreateFlockAgentSessionParams{
-		ID:               flockAgentID,
-		SessionID:        sessionID,
-		WorkingDirectory: s.dataDir,
+	newSession, err := s.queries.CreateSession(ctx, sqlc.CreateSessionParams{
+		ID:         sessionID,
+		InstanceID: flockAgentInstanceID,
+		Title:      ocSession.Title,
+		Status:     "active",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("save flock agent session: %w", err)
 	}
 
-	log.Printf("created new flock agent session %s (opencode: %s)", flockAgentID[:8], sessionID[:12])
+	log.Printf("created new flock agent session %s (opencode: %s)", sessionID[:8], sessionID[:12])
 	return &newSession, nil
 }
 
@@ -218,16 +216,16 @@ func (s *Server) handleCreateFlockAgentSession(w http.ResponseWriter, r *http.Re
 
 	writeJSON(w, map[string]any{
 		"id":         session.ID,
-		"session_id": session.SessionID,
+		"session_id": session.ID,
 		"status":     session.Status,
 	})
 }
 
 // handleRotateFlockAgentSession rotates (retires old and creates new) the Flock agent session.
 func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Request) {
-	activeSession, err := s.queries.GetActiveFlockAgentSession(r.Context())
+	activeSession, err := s.queries.GetActiveFlockAgentSessionByInstance(r.Context())
 	if err == nil && activeSession.Status == "active" {
-		s.queries.RetireFlockAgentSession(r.Context(), activeSession.ID)
+		s.queries.DeleteSession(r.Context(), activeSession.ID)
 	}
 
 	ocSession, err := s.flockAgentClient.CreateSession(r.Context(), s.dataDir)
@@ -242,11 +240,11 @@ func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Re
 		sessionID = uuid.New().String()
 	}
 
-	flockAgentID := uuid.New().String()
-	_, err = s.queries.CreateFlockAgentSession(r.Context(), sqlc.CreateFlockAgentSessionParams{
-		ID:               flockAgentID,
-		SessionID:        sessionID,
-		WorkingDirectory: s.dataDir,
+	newSession, err := s.queries.CreateSession(r.Context(), sqlc.CreateSessionParams{
+		ID:         sessionID,
+		InstanceID: flockAgentInstanceID,
+		Title:      ocSession.Title,
+		Status:     "active",
 	})
 	if err != nil {
 		log.Printf("failed to save flock agent session: %v", err)
@@ -255,9 +253,9 @@ func (s *Server) handleRotateFlockAgentSession(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, map[string]any{
-		"id":     flockAgentID,
-		"session_id": sessionID,
-		"status": "active",
+		"id":         newSession.ID,
+		"session_id": newSession.ID,
+		"status":     newSession.Status,
 	})
 }
 
@@ -269,7 +267,7 @@ func (s *Server) handleGetFlockAgentMessages(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	messages, err := s.flockAgentClient.GetMessages(r.Context(), session.SessionID)
+	messages, err := s.flockAgentClient.GetMessages(r.Context(), session.ID)
 	if err != nil {
 		log.Printf("failed to get flock agent messages: %v", err)
 		http.Error(w, "failed to get messages", http.StatusInternalServerError)
@@ -292,7 +290,7 @@ func (s *Server) handleSendFlockAgentMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := s.flockAgentClient.SendMessage(r.Context(), session.SessionID, req.Content); err != nil {
+	if err := s.flockAgentClient.SendMessage(r.Context(), session.ID, req.Content); err != nil {
 		log.Printf("failed to send flock agent message: %v", err)
 		http.Error(w, "failed to send message", http.StatusInternalServerError)
 		return
@@ -310,5 +308,5 @@ func (s *Server) handleFlockAgentEvents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.broker.ServeHTTP(w, r, session.SessionID)
+	s.broker.ServeHTTP(w, r, session.ID)
 }

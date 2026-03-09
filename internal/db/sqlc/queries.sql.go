@@ -43,6 +43,7 @@ type CreateAuthSessionParams struct {
 	Username string
 }
 
+// Auth session queries
 func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionParams) (AuthSession, error) {
 	row := q.db.QueryRowContext(ctx, createAuthSession, arg.Token, arg.Username)
 	var i AuthSession
@@ -307,6 +308,25 @@ func (q *Queries) GetActiveFlockAgentSession(ctx context.Context) (FlockAgentSes
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveFlockAgentSessionByInstance = `-- name: GetActiveFlockAgentSessionByInstance :one
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE instance_id = 'flock-agent' AND status = 'active' LIMIT 1
+`
+
+func (q *Queries) GetActiveFlockAgentSessionByInstance(ctx context.Context) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getActiveFlockAgentSessionByInstance)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
 	)
 	return i, err
 }

@@ -143,6 +143,9 @@ UPDATE flock_agent_sessions SET session_id = ?, status = ?, updated_at = datetim
 -- name: RetireFlockAgentSession :exec
 UPDATE flock_agent_sessions SET status = 'retired', updated_at = datetime('now') WHERE id = ?;
 
+-- name: GetActiveFlockAgentSessionByInstance :one
+SELECT * FROM sessions WHERE instance_id = 'flock-agent' AND status = 'active' LIMIT 1;
+
 -- Auth session queries
 
 -- name: CreateAuthSession :one
