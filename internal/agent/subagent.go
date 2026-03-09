@@ -60,7 +60,7 @@ func CreateSubAgentSession(
 	// Send message in a goroutine so it doesn't block the heartbeat loop.
 	// OpenCode's message endpoint blocks until the AI finishes processing.
 	go func() {
-		if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
+		if err := client.SendMessage(ctx, session.ID, prompt, ""); err != nil {
 			log.Printf("agent: sub-agent message failed for issue #%d: %v", task.IssueNumber, err)
 			queries.UpdateTaskStatus(context.Background(), sqlc.UpdateTaskStatusParams{
 				Status: "failed",
@@ -196,7 +196,7 @@ func RestartSubAgent(
 
 	// Send message in a goroutine so it doesn't block the heartbeat loop.
 	go func() {
-		if err := client.SendMessage(ctx, session.ID, prompt); err != nil {
+		if err := client.SendMessage(ctx, session.ID, prompt, ""); err != nil {
 			log.Printf("agent: restart message failed for issue #%d: %v", task.IssueNumber, err)
 			queries.UpdateTaskStatus(context.Background(), sqlc.UpdateTaskStatusParams{
 				Status: "failed",

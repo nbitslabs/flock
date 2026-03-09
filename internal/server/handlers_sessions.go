@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -139,6 +140,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 			"instance_id": session.InstanceID,
 			"title":       session.Title,
 			"status":      session.Status,
+			"model":       session.Model.String,
 			"created_at":  session.CreatedAt,
 			"updated_at":  session.UpdatedAt,
 		})
@@ -194,7 +196,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := client.SendMessage(r.Context(), sessionID, req.Content); err != nil {
+	if err := client.SendMessage(r.Context(), sessionID, req.Content, session.Model.String); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -229,4 +231,49 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleGetModels(w http.ResponseWriter, r *http.Request) {
+	instanceID := r.PathValue("id")
+	inst, ok := s.manager.Get(instanceID)
+	if !ok || inst.Client == nil {
+		http.Error(w, "instance not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	providers, err := inst.Client.GetProviders(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, providers)
+}
+
+type setModelRequest struct {
+	Model string `json:"model"`
+}
+
+func (s *Server) handleSetSessionModel(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("id")
+	if _, err := s.queries.GetSession(r.Context(), sessionID); err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	var req setModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	model := sql.NullString{String: req.Model, Valid: req.Model != ""}
+	if err := s.queries.UpdateSessionModel(r.Context(), sqlc.UpdateSessionModelParams{
+		Model: model,
+		ID:    sessionID,
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, map[string]string{"model": req.Model})
 }

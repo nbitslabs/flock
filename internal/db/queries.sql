@@ -42,6 +42,9 @@ ON CONFLICT(id) DO UPDATE SET
 -- name: UpdateSessionStatus :exec
 UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?;
 
+-- name: UpdateSessionModel :exec
+UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?;
+
 -- name: DeleteSessionsByInstance :exec
 DELETE FROM sessions WHERE instance_id = ?;
 

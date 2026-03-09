@@ -4,6 +4,10 @@
 
 package sqlc
 
+import (
+	"database/sql"
+)
+
 type AuthSession struct {
 	Token     string
 	Username  string
@@ -52,6 +56,7 @@ type Session struct {
 	CreatedAt  string
 	UpdatedAt  string
 	ParentID   string
+	Model      sql.NullString
 }
 
 type Task struct {

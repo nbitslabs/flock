@@ -51,6 +51,12 @@ type SendMessageRequest struct {
 	Parts []SendPart `json:"parts"`
 }
 
+type SendMessageRequestWithModel struct {
+	Parts  []SendPart `json:"parts"`
+	Model  string     `json:"model,omitempty"`
+	Agent  string     `json:"agent,omitempty"`
+}
+
 type SendPart struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -58,4 +64,24 @@ type SendPart struct {
 
 type QuestionReplyRequest struct {
 	Answers [][]string `json:"answers"`
+}
+
+type Provider struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Models      []ProviderModel `json:"models,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Status      string         `json:"status,omitempty"`
+}
+
+type ProviderModel struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	ProviderID string `json:"providerID,omitempty"`
+}
+
+type ProvidersResponse struct {
+	All       []Provider      `json:"all"`
+	Default   Provider        `json:"default"`
+	Connected []string        `json:"connected"`
 }

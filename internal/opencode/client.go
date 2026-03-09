@@ -171,10 +171,18 @@ func (c *Client) GetMessages(ctx context.Context, sessionID string) ([]Message, 
 	return messages, nil
 }
 
-func (c *Client) SendMessage(ctx context.Context, sessionID string, content string) error {
-	body, _ := json.Marshal(SendMessageRequest{
-		Parts: []SendPart{{Type: "text", Text: content}},
-	})
+func (c *Client) SendMessage(ctx context.Context, sessionID string, content string, model string) error {
+	var body []byte
+	if model != "" {
+		body, _ = json.Marshal(SendMessageRequestWithModel{
+			Parts: []SendPart{{Type: "text", Text: content}},
+			Model: model,
+		})
+	} else {
+		body, _ = json.Marshal(SendMessageRequest{
+			Parts: []SendPart{{Type: "text", Text: content}},
+		})
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/session/"+sessionID+"/message", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -256,4 +264,51 @@ func (c *Client) SubscribeEvents(ctx context.Context, handler func(rawJSON strin
 		}
 	}
 	return scanner.Err()
+}
+
+// GetProviders returns all available providers from the OpenCode server.
+func (c *Client) GetProviders(ctx context.Context) (*ProvidersResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/provider", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get providers: status %d: %s", resp.StatusCode, body)
+	}
+	var providers ProvidersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
+		return nil, err
+	}
+	return &providers, nil
+}
+
+// GetConfigProviders returns providers with their default models from config.
+func (c *Client) GetConfigProviders(ctx context.Context) (map[string][]ProviderModel, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/config/providers", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("get config providers: status %d: %s", resp.StatusCode, body)
+	}
+	var result struct {
+		Providers map[string][]ProviderModel `json:"providers"`
+		Default   map[string]string          `json:"default"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Providers, nil
 }

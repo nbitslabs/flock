@@ -233,7 +233,7 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID string) error {
 		return fmt.Errorf("create upgrade session: %w", err)
 	}
 
-	if err := h.client.SendMessage(ctx, session.ID, prompt); err != nil {
+	if err := h.client.SendMessage(ctx, session.ID, prompt, ""); err != nil {
 		return fmt.Errorf("send upgrade prompt: %w", err)
 	}
 

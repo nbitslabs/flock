@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 )
 
 const countActiveTasksByInstance = `-- name: CountActiveTasksByInstance :one
@@ -153,7 +154,7 @@ func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrche
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (id, instance_id, title, status)
 VALUES (?, ?, ?, ?)
-RETURNING id, instance_id, title, status, created_at, updated_at, parent_id
+RETURNING id, instance_id, title, status, created_at, updated_at, parent_id, model
 `
 
 type CreateSessionParams struct {
@@ -179,6 +180,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ParentID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -313,7 +315,7 @@ func (q *Queries) GetActiveFlockAgentSession(ctx context.Context) (FlockAgentSes
 }
 
 const getActiveFlockAgentSessionByInstance = `-- name: GetActiveFlockAgentSessionByInstance :one
-SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE instance_id = 'flock-agent' AND status = 'active' LIMIT 1
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id, model FROM sessions WHERE instance_id = 'flock-agent' AND status = 'active' LIMIT 1
 `
 
 func (q *Queries) GetActiveFlockAgentSessionByInstance(ctx context.Context) (Session, error) {
@@ -327,6 +329,7 @@ func (q *Queries) GetActiveFlockAgentSessionByInstance(ctx context.Context) (Ses
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ParentID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -435,7 +438,7 @@ func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID str
 }
 
 const getSession = `-- name: GetSession :one
-SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE id = ?
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id, model FROM sessions WHERE id = ?
 `
 
 func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
@@ -449,6 +452,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ParentID,
+		&i.Model,
 	)
 	return i, err
 }
@@ -596,7 +600,7 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 }
 
 const listSessionsByInstance = `-- name: ListSessionsByInstance :many
-SELECT id, instance_id, title, status, created_at, updated_at, parent_id FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
+SELECT id, instance_id, title, status, created_at, updated_at, parent_id, model FROM sessions WHERE instance_id = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string) ([]Session, error) {
@@ -616,6 +620,7 @@ func (q *Queries) ListSessionsByInstance(ctx context.Context, instanceID string)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ParentID,
+			&i.Model,
 		); err != nil {
 			return nil, err
 		}
@@ -777,6 +782,20 @@ type UpdateInstanceStatusParams struct {
 
 func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateInstanceStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateSessionModel = `-- name: UpdateSessionModel :exec
+UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?
+`
+
+type UpdateSessionModelParams struct {
+	Model sql.NullString
+	ID    string
+}
+
+func (q *Queries) UpdateSessionModel(ctx context.Context, arg UpdateSessionModelParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionModel, arg.Model, arg.ID)
 	return err
 }
 
