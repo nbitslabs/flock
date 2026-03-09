@@ -67,11 +67,11 @@ type QuestionReplyRequest struct {
 }
 
 type Provider struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Models      []ProviderModel `json:"models,omitempty"`
-	Description string         `json:"description,omitempty"`
-	Status      string         `json:"status,omitempty"`
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	Models      map[string]ProviderModel  `json:"models,omitempty"`
+	Description string                    `json:"description,omitempty"`
+	Status      string                    `json:"status,omitempty"`
 }
 
 type ProviderModel struct {

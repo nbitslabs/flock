@@ -1531,32 +1531,28 @@
             container.classList.add('hidden');
             return;
         }
-        
+
         container.classList.remove('hidden');
-        
+
         const currentValue = store.selectedModel || '';
-        const currentSelection = selector.value;
-        
+
         selector.innerHTML = '<option value="">Default</option>';
         for (const provider of store.availableModels) {
+            const models = provider.models || {};
+            const modelEntries = Object.values(models);
+            if (!modelEntries.length) continue;
             const optGroup = document.createElement('optgroup');
             optGroup.label = provider.name || provider.id;
-            for (const model of provider.models || []) {
+            for (const model of modelEntries) {
                 const option = document.createElement('option');
                 option.value = model.id;
                 option.textContent = model.name || model.id;
                 optGroup.appendChild(option);
             }
-            if (optGroup.children.length > 0) {
-                selector.appendChild(optGroup);
-            }
+            selector.appendChild(optGroup);
         }
-        
+
         selector.value = currentValue;
-        
-        if (selector.value !== currentValue) {
-            selector.value = currentValue;
-        }
         
         selector.onchange = function() {
             setSessionModel(store.selectedSessionId, this.value);
