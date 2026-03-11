@@ -34,22 +34,29 @@ detect_package_manager() {
 install_golang() {
     if command -v go &> /dev/null; then
         local version
-        version=$(go version 2>/dev/null | grep -oP 'go\d+\.\d+' | sed 's/go//')
-        if [[ "${version%.*}" -ge 22 ]]; then
+        version=$(go version 2>/dev/null | sed -n 's/.*go\([0-9]*\.[0-9]*\).*/\1/p')
+        local major minor
+        major="${version%%.*}"
+        minor="${version#*.}"
+        if [[ "$major" -ge 1 ]] && [[ "$minor" -ge 22 ]]; then
             log "Go ${version} already installed"
             return 0
         fi
     fi
     
     log "Installing Go..."
-    local os_type
-    os_type=$(detect_os)
+    local go_os
+    case "$(uname -s)" in
+        Linux*)  go_os="linux";;
+        Darwin*) go_os="darwin";;
+        *)       go_os="linux";;
+    esac
     local arch
     arch=$(uname -m)
     [[ "$arch" == "x86_64" ]] && arch="amd64" || [[ "$arch" == "arm64" ]] && arch="arm64"
-    
+
     local go_version="1.24.7"
-    local go_archive="go${go_version}.${os_type}-${arch}.tar.gz"
+    local go_archive="go${go_version}.${go_os}-${arch}.tar.gz"
     
     curl -sL "https://go.dev/dl/${go_archive}" -o "/tmp/${go_archive}"
     sudo rm -rf /usr/local/go
@@ -75,8 +82,8 @@ install_github_cli() {
     else
         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        sudo apt update
-        sudo apt install gh
+        sudo apt-get update -y
+        sudo apt-get install -y gh
     fi
 }
 
@@ -319,21 +326,28 @@ authenticate_github() {
         log "Skipping GitHub authentication (SKIP_AUTH=true)"
         return 0
     fi
-    
+
     if gh auth status &> /dev/null; then
         log "GitHub CLI already authenticated"
         return 0
     fi
-    
+
     if [[ "$NON_INTERACTIVE" == "true" ]]; then
         log "GitHub CLI requires authentication. Run: gh auth login"
-        return 1
+        return 0
     fi
-    
-    log "Please authenticate with GitHub CLI..."
-    gh auth login
-    
-    log "GitHub CLI authenticated"
+
+    echo ""
+    read -p "Would you like to authenticate GitHub CLI now? (Y/n): " gh_auth_choice
+    gh_auth_choice="${gh_auth_choice:-Y}"
+
+    if [[ "$gh_auth_choice" =~ ^[Yy]$ ]]; then
+        log "Please authenticate with GitHub CLI..."
+        gh auth login
+        log "GitHub CLI authenticated"
+    else
+        log "Skipping GitHub authentication. Run 'gh auth login' later."
+    fi
 }
 
 authenticate_opencode() {
@@ -341,26 +355,23 @@ authenticate_opencode() {
         log "Skipping OpenCode authentication (SKIP_AUTH=true)"
         return 0
     fi
-    
-    if [[ -f "${INSTALL_DIR}/opencode/config.json" ]]; then
-        local opencode_url
-        opencode_url="http://127.0.0.1:4096"
-        
-        if curl -s "${opencode_url}/session" &> /dev/null; then
-            log "OpenCode server accessible"
-            return 0
-        fi
-    fi
-    
+
     if [[ "$NON_INTERACTIVE" == "true" ]]; then
         log "OpenCode requires authentication. Run: opencode auth login"
-        return 1
+        return 0
     fi
-    
-    log "Please authenticate with OpenCode..."
-    log "Please run: opencode auth login"
-    
-    return 0
+
+    echo ""
+    read -p "Would you like to authenticate OpenCode now? (Y/n): " oc_auth_choice
+    oc_auth_choice="${oc_auth_choice:-Y}"
+
+    if [[ "$oc_auth_choice" =~ ^[Yy]$ ]]; then
+        log "Please authenticate with OpenCode..."
+        "${INSTALL_DIR}/bin/opencode" auth login
+        log "OpenCode authenticated"
+    else
+        log "Skipping OpenCode authentication. Run 'opencode auth login' later."
+    fi
 }
 
 setup_flock_auth() {
@@ -389,7 +400,8 @@ setup_flock_auth() {
         log "Setting up Flock basic authentication..."
         
         sed -i.bak "s/username = \"\"/username = \"$FLOCK_USERNAME\"/" "${INSTALL_DIR}/flock.toml"
-        sed -i "s/password = \"\"/password = \"$FLOCK_PASSWORD\"/" "${INSTALL_DIR}/flock.toml"
+        sed -i.bak "s/password = \"\"/password = \"$FLOCK_PASSWORD\"/" "${INSTALL_DIR}/flock.toml"
+        rm -f "${INSTALL_DIR}/flock.toml.bak"
         
         log "Flock auth configured"
     else
@@ -567,7 +579,6 @@ if [[ -d "${INSTALL_DIR}/flock/.git" ]]; then
 fi
 
 if command -v opencode &> /dev/null; then
-    local current_version
     current_version=$(opencode --version 2>/dev/null || echo "unknown")
     opencode --version-check || true
     log "OpenCode current version: $current_version"
@@ -711,9 +722,9 @@ main() {
     setup_services
     start_services
     
-    authenticate_github || true
-    authenticate_opencode || true
-    
+    authenticate_github
+    authenticate_opencode
+
     setup_flock_auth
     
     setup_reverse_proxy
