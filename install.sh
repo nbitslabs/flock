@@ -98,22 +98,28 @@ install_opencode() {
         log "OpenCode already installed"
         return 0
     fi
-    
+
     log "Installing OpenCode..."
-    local os_type
-    os_type=$(detect_os)
-    local arch
-    arch=$(uname -m)
-    case "$arch" in
-        aarch64) arch="arm64";;
+    local oc_os oc_arch
+    case "$(uname -s)" in
+        Linux*)  oc_os="linux";;
+        Darwin*) oc_os="darwin";;
+    esac
+    case "$(uname -m)" in
+        x86_64)  oc_arch="x64";;
+        aarch64) oc_arch="arm64";;
+        arm64)   oc_arch="arm64";;
     esac
 
-    local opencode_url
-    opencode_url="https://github.com/opencodeai/opencode/releases/latest/download/opencode-${os_type}-${arch}"
-    
-    curl -sL "$opencode_url" -o "${INSTALL_DIR}/bin/opencode"
+    local oc_archive="opencode-${oc_os}-${oc_arch}.tar.gz"
+    local oc_url="https://github.com/anomalyco/opencode/releases/latest/download/${oc_archive}"
+
+    log "Downloading ${oc_archive}..."
+    curl -fSL "$oc_url" -o "/tmp/${oc_archive}"
+    tar -xzf "/tmp/${oc_archive}" -C "${INSTALL_DIR}/bin"
+    rm "/tmp/${oc_archive}"
     chmod +x "${INSTALL_DIR}/bin/opencode"
-    
+
     add_to_path
     log "OpenCode installed successfully"
 }
