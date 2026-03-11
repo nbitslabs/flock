@@ -31,6 +31,15 @@ detect_package_manager() {
     fi
 }
 
+update_package_index() {
+    local pkg_manager
+    pkg_manager=$(detect_package_manager)
+    if [[ "$pkg_manager" == "apt" ]]; then
+        log "Updating package index..."
+        sudo apt-get update -y
+    fi
+}
+
 install_golang() {
     if command -v go &> /dev/null; then
         local version
@@ -88,7 +97,6 @@ install_github_cli() {
     else
         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        sudo apt-get update -y
         sudo apt-get install -y gh
     fi
 }
@@ -228,7 +236,8 @@ Type=simple
 User=$USER
 WorkingDirectory=${INSTALL_DIR}
 Environment="PATH=${INSTALL_DIR}/bin:/usr/local/go/bin:$PATH"
-ExecStart=${INSTALL_DIR}/bin/opencode serve --config ${INSTALL_DIR}/opencode/config.json
+Environment="OPENCODE_CONFIG=${INSTALL_DIR}/opencode/config.json"
+ExecStart=${INSTALL_DIR}/bin/opencode serve
 Restart=always
 RestartSec=10
 
@@ -286,8 +295,6 @@ EOF
     <array>
         <string>${INSTALL_DIR}/bin/opencode</string>
         <string>serve</string>
-        <string>--config</string>
-        <string>${INSTALL_DIR}/opencode/config.json</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${INSTALL_DIR}</string>
@@ -299,6 +306,8 @@ EOF
     <dict>
         <key>PATH</key>
         <string>${INSTALL_DIR}/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>OPENCODE_CONFIG</key>
+        <string>${INSTALL_DIR}/opencode/config.json</string>
     </dict>
 </dict>
 </plist>
@@ -400,8 +409,7 @@ install_nginx() {
     
     case "$pkg_manager" in
         apt)
-            sudo apt update
-            sudo apt install -y nginx
+            sudo apt-get install -y nginx
             ;;
         yum)
             sudo yum install -y nginx
@@ -486,8 +494,7 @@ install_certbot() {
     
     case "$pkg_manager" in
         apt)
-            sudo apt update
-            sudo apt install -y certbot python3-certbot-nginx
+            sudo apt-get install -y certbot python3-certbot-nginx
             ;;
         yum)
             sudo yum install -y certbot python3-certbot-nginx
@@ -726,6 +733,8 @@ main() {
 
     mkdir -p "${INSTALL_DIR}/bin"
     mkdir -p "${INSTALL_DIR}/logs"
+
+    update_package_index
 
     install_golang
     install_github_cli
