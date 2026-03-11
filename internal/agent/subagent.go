@@ -10,19 +10,28 @@ import (
 	"github.com/nbitslabs/flock/internal/opencode"
 )
 
-// CreateSubAgentSession creates a new OpenCode session and sends an issue-resolution prompt.
-// The session and DB records are created synchronously, but the actual message send
-// runs in a goroutine so it does not block the heartbeat loop.
+// CreateSubAgentSession creates a new OpenCode session inside the worktree and
+// sends an issue-resolution prompt. The worktree must already exist (created by
+// EnsureWorktree). The session and DB records are created synchronously, but the
+// actual message send runs in a goroutine so it does not block the heartbeat loop.
 func CreateSubAgentSession(
 	ctx context.Context,
 	client *opencode.Client,
 	queries *sqlc.Queries,
 	instanceID string,
 	dataDir string,
-	workingDir string,
+	org, repo string,
+	sourceRepoPath string,
 	task *sqlc.Task,
 ) error {
-	session, err := client.CreateSession(ctx, workingDir)
+	// Create the worktree via Go code (not LLM instructions)
+	wtPath, err := EnsureWorktree(dataDir, org, repo, task.BranchName, sourceRepoPath)
+	if err != nil {
+		return fmt.Errorf("ensure worktree: %w", err)
+	}
+
+	// Create session inside the worktree directory
+	session, err := client.CreateSession(ctx, wtPath)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
@@ -34,7 +43,6 @@ func CreateSubAgentSession(
 		Title:      fmt.Sprintf("Issue #%d: %s", task.IssueNumber, task.Title),
 		Status:     "active",
 	}); err != nil {
-		// Session already exists is OK (upsert)
 		queries.UpsertSession(ctx, sqlc.UpsertSessionParams{
 			ID:         session.ID,
 			InstanceID: instanceID,
@@ -53,12 +61,11 @@ func CreateSubAgentSession(
 		ID:     task.ID,
 	})
 
-	log.Printf("agent: created sub-agent session %s for issue #%d", session.ID[:8], task.IssueNumber)
+	log.Printf("agent: created sub-agent session %s for issue #%d in worktree %s", session.ID[:8], task.IssueNumber, wtPath)
 
-	prompt := composeSubAgentPrompt(dataDir, instanceID, workingDir, task)
+	prompt := composeSubAgentPrompt(dataDir, org, repo, wtPath, task)
 
 	// Send message in a goroutine so it doesn't block the heartbeat loop.
-	// OpenCode's message endpoint blocks until the AI finishes processing.
 	go func() {
 		if err := client.SendMessage(ctx, session.ID, prompt, ""); err != nil {
 			log.Printf("agent: sub-agent message failed for issue #%d: %v", task.IssueNumber, err)
@@ -72,72 +79,66 @@ func CreateSubAgentSession(
 	return nil
 }
 
-func composeSubAgentPrompt(dataDir, instanceID, workingDir string, task *sqlc.Task) string {
-	worktreeDir := memory.InstanceWorktreePath(dataDir, instanceID, task.BranchName)
-	progressPath := memory.InstanceProgressPath(dataDir, instanceID)
+func composeSubAgentPrompt(dataDir, org, repo, worktreePath string, task *sqlc.Task) string {
+	repoStatePath := memory.RepoStatePath(dataDir, org, repo)
+	progressPath := memory.RepoProgressPath(dataDir, org, repo)
 
 	return fmt.Sprintf(`You are an autonomous coding agent resolving a GitHub issue. Work independently to completion.
 
-## Setup — Git Worktree
-Each sub-agent works in its own git worktree to avoid interfering with other agents. Run these commands first:
+## Environment
 
-`+"```bash"+`
-mkdir -p %s
-cd %s
-git worktree add -b %s %s
-cd %s
-`+"```"+`
+You are already inside the git worktree for this task. Your working directory is:
+`+"`%s`"+`
 
-All subsequent work MUST happen inside the worktree directory: `+"`%s`"+`
+**Do not create or switch worktrees.** All your work happens in the current directory.
 
 ## Issue
 - **Number**: #%d
 - **Title**: %s
 - **URL**: %s
 
+## State Paths
+- Repo state: `+"`%s`"+`
+- Progress file: `+"`%s/issue_%d.md`"+`
+
 ## Workflow
 1. Read the issue details: `+"`gh issue view %d`"+`
 2. Understand the codebase and the issue
-3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and worktree path. It will write a plan to `+"`%s/progress/issue_%d.md`"+`.
-4. Read the plan from `+"`%s/progress/issue_%d.md`"+` to understand the proposed solution
+3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and the repo state path. It will write a plan to `+"`%s/issue_%d.md`"+`.
+4. Read the plan from `+"`%s/issue_%d.md`"+` to understand the proposed solution
 5. Implement the fix/feature based on the plan
 6. Run tests to verify
 7. Stage your changes with `+"`git add`"+`
-8. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, the list of staged files, and the worktree path (%s). It will return a properly formatted commit message. Make sure the commit message body includes `+"`Fixes #%d`"+`.
+8. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. Make sure the commit message body includes `+"`Fixes #%d`"+`.
 9. Commit with the generated message
 10. Push the branch: `+"`git push -u origin %s`"+`
-11. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, the issue URL (%s), and the worktree path (%s). It will create a new PR or update an existing one and return the PR URL.
+11. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, and the issue URL (%s).
 
 ## Environment
 This project uses Nix for development tooling. To run commands with the devenv (compilers, linters, CLI utilities, etc.), wrap them with `+"`nix develop --impure -c bash -c \"<command>\"`"+`. For example: `+"`nix develop --impure -c bash -c \"go test ./...\"`"+`
 
 ## Rules
 - Work autonomously — do not ask for human input
-- Always work inside the worktree: `+"`%s`"+`
+- You are already in the worktree — do NOT run git worktree commands
 - Write clean, tested code
 - If tests fail, fix them before proceeding
-- Write progress to `+"`%s/progress/issue_%d.md`"+`
+- Write progress to `+"`%s/issue_%d.md`"+`
 - If you get stuck, describe the blocker in the progress file
 - When done, do NOT remove the worktree — flock manages cleanup
 `,
-		worktreeDir,
-		worktreeDir,
-		task.BranchName, workingDir,
-		worktreeDir,
-		worktreeDir,
+		worktreePath,
 		task.IssueNumber,
 		task.Title,
 		task.IssueUrl,
+		repoStatePath,
+		progressPath, task.IssueNumber,
 		task.IssueNumber,
 		progressPath, task.IssueNumber,
 		progressPath, task.IssueNumber,
 		task.IssueNumber, task.Title,
-		worktreeDir,
 		task.IssueNumber,
 		task.BranchName,
 		task.IssueNumber, task.Title, task.IssueUrl,
-		worktreeDir,
-		worktreeDir,
 		progressPath, task.IssueNumber,
 	)
 }
@@ -149,14 +150,22 @@ func RestartSubAgent(
 	queries *sqlc.Queries,
 	instanceID string,
 	dataDir string,
-	workingDir string,
+	org, repo string,
+	sourceRepoPath string,
 	task *sqlc.Task,
 	reason string,
 ) error {
-	// Read existing progress if any
-	progressContent, _ := memory.ReadInstanceMemory(dataDir, instanceID)
+	// Ensure worktree exists (may already exist from previous attempt)
+	wtPath, err := EnsureWorktree(dataDir, org, repo, task.BranchName, sourceRepoPath)
+	if err != nil {
+		return fmt.Errorf("ensure worktree for restart: %w", err)
+	}
 
-	session, err := client.CreateSession(ctx, workingDir)
+	// Read existing progress if any
+	progressContent, _ := memory.ReadRepoMemory(dataDir, org, repo)
+
+	// Create session inside the worktree
+	session, err := client.CreateSession(ctx, wtPath)
 	if err != nil {
 		return fmt.Errorf("create restart session: %w", err)
 	}
@@ -184,9 +193,9 @@ func RestartSubAgent(
 		ID:     task.ID,
 	})
 
-	prompt := composeSubAgentPrompt(dataDir, instanceID, workingDir, task)
+	prompt := composeSubAgentPrompt(dataDir, org, repo, wtPath, task)
 	prompt += fmt.Sprintf("\n## Previous Attempt\nThe previous session was stuck. Reason: %s\n", reason)
-	prompt += fmt.Sprintf("\n## Note\nThe worktree and branch may already exist from the previous attempt. If `git worktree add` fails because it already exists, just `cd` into the worktree directory and continue from where the previous agent left off.\n")
+	prompt += "\n## Note\nThe worktree and branch already exist from the previous attempt. Continue from where the previous agent left off.\n"
 	if progressContent != "" {
 		prompt += fmt.Sprintf("\n## Context from Memory\n%s\n", progressContent)
 	}
@@ -194,7 +203,6 @@ func RestartSubAgent(
 	log.Printf("agent: restarted sub-agent session %s for issue #%d (reason: %s)",
 		session.ID[:8], task.IssueNumber, reason)
 
-	// Send message in a goroutine so it doesn't block the heartbeat loop.
 	go func() {
 		if err := client.SendMessage(ctx, session.ID, prompt, ""); err != nil {
 			log.Printf("agent: restart message failed for issue #%d: %v", task.IssueNumber, err)

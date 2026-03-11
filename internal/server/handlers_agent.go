@@ -17,7 +17,13 @@ import (
 func (s *Server) handleGetHeartbeat(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
 
-	content, err := memory.ReadHeartbeat(s.dataDir, instanceID)
+	instance, err := s.queries.GetInstance(r.Context(), instanceID)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	content, err := memory.ReadRepoHeartbeat(s.dataDir, instance.Org, instance.Repo)
 	if err != nil {
 		http.Error(w, "failed to read heartbeat: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -31,13 +37,19 @@ func (s *Server) handleGetHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePutHeartbeat(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
 
+	instance, err := s.queries.GetInstance(r.Context(), instanceID)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
 
-	if err := memory.WriteHeartbeat(s.dataDir, instanceID, string(body)); err != nil {
+	if err := memory.WriteRepoHeartbeat(s.dataDir, instance.Org, instance.Repo, string(body)); err != nil {
 		http.Error(w, "failed to write heartbeat: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -86,11 +98,17 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, result)
 }
 
-// handleGetInstanceMemory returns .flock/memory/MEMORY.md for an instance.
+// handleGetInstanceMemory returns MEMORY.md for an instance.
 func (s *Server) handleGetInstanceMemory(w http.ResponseWriter, r *http.Request) {
 	instanceID := r.PathValue("id")
 
-	content, err := memory.ReadInstanceMemory(s.dataDir, instanceID)
+	instance, err := s.queries.GetInstance(r.Context(), instanceID)
+	if err != nil {
+		http.Error(w, "instance not found", http.StatusNotFound)
+		return
+	}
+
+	content, err := memory.ReadRepoMemory(s.dataDir, instance.Org, instance.Repo)
 	if err != nil {
 		http.Error(w, "failed to read memory: "+err.Error(), http.StatusInternalServerError)
 		return

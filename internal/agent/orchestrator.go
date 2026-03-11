@@ -21,6 +21,8 @@ type Orchestrator struct {
 	instanceID string
 	workingDir string
 	dataDir    string
+	org        string
+	repo       string
 	cfg        AgentConfig
 	// subscribeFn returns a channel of raw SSE events and an unsubscribe func.
 	subscribeFn func(sessionID string) (<-chan string, func())
@@ -30,15 +32,17 @@ func NewOrchestrator(
 	client *opencode.Client,
 	queries *sqlc.Queries,
 	instanceID, dataDir string,
+	org, repo string,
 	cfg AgentConfig,
 	subscribeFn func(sessionID string) (<-chan string, func()),
 ) *Orchestrator {
-	// We'll get workingDir from the database when needed
 	return &Orchestrator{
 		client:      client,
 		queries:     queries,
 		instanceID:  instanceID,
 		dataDir:     dataDir,
+		org:         org,
+		repo:        repo,
 		cfg:         cfg,
 		subscribeFn: subscribeFn,
 	}
@@ -123,17 +127,17 @@ func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.Orc
 func (o *Orchestrator) composeBootstrapMessage() string {
 	var sb strings.Builder
 
-	heartbeat, err := memory.ReadHeartbeat(o.dataDir, o.instanceID)
+	heartbeat, err := memory.ReadRepoHeartbeat(o.dataDir, o.org, o.repo)
 	if err == nil && heartbeat != "" {
 		sb.WriteString("# Heartbeat Instructions\n\n")
 		sb.WriteString(heartbeat)
 		sb.WriteString("\n\n")
 	}
 
-	instMemory, err := memory.ReadInstanceMemory(o.dataDir, o.instanceID)
-	if err == nil && instMemory != "" {
-		sb.WriteString("# Instance Memory\n\n")
-		sb.WriteString(instMemory)
+	repoMemory, err := memory.ReadRepoMemory(o.dataDir, o.org, o.repo)
+	if err == nil && repoMemory != "" {
+		sb.WriteString("# Repository Memory\n\n")
+		sb.WriteString(repoMemory)
 		sb.WriteString("\n\n")
 	}
 
@@ -153,9 +157,7 @@ func (o *Orchestrator) composeBootstrapMessage() string {
 }
 
 // SendHeartbeat sends a heartbeat message to the orchestrator session and
-// waits for it to become idle. If the session was just created (bootstrapped),
-// it skips sending a duplicate heartbeat since the bootstrap already triggered
-// the orchestrator to check for issues and write decision files.
+// waits for it to become idle.
 func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 	orch, justCreated, err := o.EnsureSession(ctx)
 	if err != nil {
@@ -163,10 +165,6 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 	}
 
 	if justCreated {
-		// Bootstrap already had the orchestrator check for issues and write
-		// decision files. Sending another heartbeat now would cause it to
-		// overwrite those files with empty arrays. Skip and let the caller
-		// process the bootstrap's decisions.
 		log.Printf("agent: session just bootstrapped, skipping duplicate heartbeat")
 		return nil
 	}
@@ -174,7 +172,6 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 	msg := o.composeHeartbeatMessage(ctx)
 
 	if err := o.client.SendMessage(ctx, orch.SessionID, msg, ""); err != nil {
-		// Session may have been deleted externally — retire and recreate
 		log.Printf("agent: heartbeat send failed, retiring stale session %s: %v", truncID(orch.SessionID), err)
 		o.queries.RetireOrchestratorSession(ctx, orch.ID)
 		orch, _, err = o.EnsureSession(ctx)
@@ -186,7 +183,6 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 
 	o.queries.IncrementHeartbeatCount(ctx, orch.ID)
 
-	// Wait for orchestrator to finish processing
 	if err := o.waitForIdle(ctx, orch.SessionID); err != nil {
 		return fmt.Errorf("wait for idle: %w", err)
 	}
@@ -201,8 +197,11 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 		workingDir = instance.WorkingDirectory
 	}
 
+	repoStatePath := memory.RepoStatePath(o.dataDir, o.org, o.repo)
+	decisionsPath := memory.RepoDecisionsPath(o.dataDir, o.org, o.repo)
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\n\n", workingDir))
+	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\nRepo state: `%s`\n\n", workingDir, repoStatePath))
 
 	// Include tracked tasks
 	tasks, err := o.queries.ListActiveTasks(ctx, o.instanceID)
@@ -240,19 +239,16 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	sb.WriteString("1. Run `gh issue list --assignee=@me --state=open --json number,url,title`\n")
 	sb.WriteString("2. For each active/stuck task above, check if its issue is closed: `gh issue view <number> --json state -q .state`\n")
 	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged: `gh pr view <pr_url> --json state -q .state`\n")
-	sb.WriteString("4. Write `<dataDir>/.flock/memory/instances/<instanceID>/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
-	sb.WriteString("5. Compare issue list with active tasks and write `<dataDir>/.flock/memory/instances/<instanceID>/new_tasks.json` for new issues\n")
-	sb.WriteString("6. Write `<dataDir>/.flock/memory/instances/<instanceID>/restart_tasks.json` for stuck tasks needing restart\n")
-	sb.WriteString("7. For each completed task, remove its worktree: `git worktree remove <worktree_path>` (path is `<dataDir>/.flock/worktrees/<instanceID>/<branch_name>`)\n")
-	sb.WriteString("8. Update `<dataDir>/.flock/memory/instances/<instanceID>/MEMORY.md` with any observations\n")
-	sb.WriteString("9. For each completed task, invoke the `@flock-self-reflect` subagent to update memory (see HEARTBEAT.md for details)\n")
+	sb.WriteString(fmt.Sprintf("4. Write `%s/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n", decisionsPath))
+	sb.WriteString(fmt.Sprintf("5. Compare issue list with active tasks and write `%s/new_tasks.json` for new issues\n", decisionsPath))
+	sb.WriteString(fmt.Sprintf("6. Write `%s/restart_tasks.json` for stuck tasks needing restart\n", decisionsPath))
+	sb.WriteString(fmt.Sprintf("7. Update `%s/MEMORY.md` with any observations\n", repoStatePath))
+	sb.WriteString("8. For each completed task, invoke the `@flock-self-reflect` subagent to update memory (see HEARTBEAT.md for details)\n")
 
 	return sb.String()
 }
 
-// waitForIdle blocks until the session becomes idle. It uses both SSE events
-// (fast path for same-directory sessions) and polling (fallback for sessions
-// in other directories whose events may not appear on the global SSE stream).
+// waitForIdle blocks until the session becomes idle.
 func (o *Orchestrator) waitForIdle(ctx context.Context, sessionID string) error {
 	timeout := o.cfg.WaitForIdleTimeout
 	if timeout == 0 {
@@ -262,11 +258,9 @@ func (o *Orchestrator) waitForIdle(ctx context.Context, sessionID string) error 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
-	// Poll ticker as fallback — checks session status every 3 seconds
 	pollTicker := time.NewTicker(3 * time.Second)
 	defer pollTicker.Stop()
 
-	// Also listen for SSE events if available (fast path)
 	var ch <-chan string
 	if o.subscribeFn != nil {
 		var unsub func()

@@ -1,9 +1,8 @@
-# Instance Memory
+# Repository Memory
 
 This file persists context across orchestrator sessions for this repository.
 
 ## Repository Info
-- Working directory: (auto-populated)
-- Instance ID: (auto-populated)
+- Org/Repo: (auto-populated from instance)
 
 ## Notes

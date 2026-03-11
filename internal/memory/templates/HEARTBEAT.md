@@ -28,7 +28,9 @@ Do this **before** writing the decision files so the issue author gets prompt fe
 
 ### 5. Write Decision Files
 
-#### For completed tasks, write `<dataDir>/.flock/memory/instances/<instanceID>/completed_tasks.json`:
+The heartbeat message includes the `decisions/` path. Use that path for all decision files.
+
+#### For completed tasks, write `{decisionsPath}/completed_tasks.json`:
 ```json
 [
   {
@@ -39,7 +41,7 @@ Do this **before** writing the decision files so the issue author gets prompt fe
 ```
 The `reason` should be `"issue closed"` or `"pr merged"` depending on which condition was met.
 
-#### For new issues, write `<dataDir>/.flock/memory/instances/<instanceID>/new_tasks.json`:
+#### For new issues, write `{decisionsPath}/new_tasks.json`:
 ```json
 [
   {
@@ -51,7 +53,7 @@ The `reason` should be `"issue closed"` or `"pr merged"` depending on which cond
 ]
 ```
 
-#### For tasks that need restarting, write `<dataDir>/.flock/memory/instances/<instanceID>/restart_tasks.json`:
+#### For tasks that need restarting, write `{decisionsPath}/restart_tasks.json`:
 ```json
 [
   {
@@ -64,20 +66,18 @@ The `reason` should be `"issue closed"` or `"pr merged"` depending on which cond
 ### 6. Trigger Self-Reflection
 
 For each **completed task**, invoke the `@flock-self-reflect` subagent to update memory:
-- Send it the instance ID, issue number, issue title, session ID, and data directory path
-- Wait for the reflection to complete before continuing
+- Send it the repo state path, issue number, issue title, and session ID
 
 Example:
 ```
 Invoke @flock-self-reflect with:
-- Instance: {instanceID}
+- Repo state: {repoStatePath}
 - Issue: #{number}: {title}
 - Session: {sessionID}
-- DataDir: {dataDir}
 ```
 
 ### 7. Update Memory
-Write any relevant observations to `<dataDir>/.flock/memory/instances/<instanceID>/MEMORY.md` to maintain context across sessions.
+Write any relevant observations to `{repoStatePath}/MEMORY.md` to maintain context across sessions.
 
 ## Important Rules
 - Only create tasks for issues assigned to you (`@me`)
@@ -85,3 +85,4 @@ Write any relevant observations to `<dataDir>/.flock/memory/instances/<instanceI
 - Do NOT attempt to resolve issues yourself — sub-agent sessions handle that
 - Only write decision files when you have actions to take (new tasks to create, tasks to complete, or tasks to restart). Do NOT write empty arrays — just skip writing the file if there are no actions.
 - Be concise in memory updates
+- The heartbeat message provides exact paths for decision files and repo state — use those paths directly

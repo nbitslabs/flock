@@ -2,10 +2,7 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"os"
-	"os/exec"
 
 	"github.com/google/uuid"
 	"github.com/nbitslabs/flock/internal/db/sqlc"
@@ -20,24 +17,26 @@ type DecisionProcessor struct {
 	queries    *sqlc.Queries
 	dataDir    string
 	instanceID string
+	org        string
+	repo       string
 	cfg        AgentConfig
 }
 
-func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, dataDir, instanceID string, cfg AgentConfig) *DecisionProcessor {
-	return &DecisionProcessor{client: client, queries: queries, dataDir: dataDir, instanceID: instanceID, cfg: cfg}
+func NewDecisionProcessor(client *opencode.Client, queries *sqlc.Queries, dataDir, instanceID, org, repo string, cfg AgentConfig) *DecisionProcessor {
+	return &DecisionProcessor{client: client, queries: queries, dataDir: dataDir, instanceID: instanceID, org: org, repo: repo, cfg: cfg}
 }
 
-// ProcessDecisions reads decision files from the instance memory directory,
+// ProcessDecisions reads decision files from the repo state directory,
 // creates sub-agent sessions for new tasks, marks completed tasks, and restarts stuck ones.
 func (dp *DecisionProcessor) ProcessDecisions(ctx context.Context, instanceID string) {
 	dp.processCompletedTasks(ctx, instanceID)
 	dp.processNewTasks(ctx, instanceID)
 	dp.processRestarts(ctx, instanceID)
-	memory.ClearDecisionFiles(dp.dataDir, instanceID)
+	memory.ClearRepoDecisionFiles(dp.dataDir, dp.org, dp.repo)
 }
 
 func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID string) {
-	decisions, err := memory.ReadNewTasks(dp.dataDir, instanceID)
+	decisions, err := memory.ReadRepoNewTasks(dp.dataDir, dp.org, dp.repo)
 	if err != nil {
 		log.Printf("agent: failed to read new_tasks.json: %v", err)
 		return
@@ -97,14 +96,18 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID str
 			continue
 		}
 
-		// Get workingDir from instance
+		// Get workingDir (source repo) from instance
 		instance, err := dp.queries.GetInstance(ctx, instanceID)
-		workingDir := ""
-		if err == nil {
-			workingDir = instance.WorkingDirectory
+		if err != nil {
+			log.Printf("agent: failed to get instance for issue #%d: %v", d.IssueNumber, err)
+			dp.queries.UpdateTaskStatus(ctx, sqlc.UpdateTaskStatusParams{
+				Status: "failed",
+				ID:     taskID,
+			})
+			continue
 		}
 
-		if err := CreateSubAgentSession(ctx, dp.client, dp.queries, instanceID, dp.dataDir, workingDir, &task); err != nil {
+		if err := CreateSubAgentSession(ctx, dp.client, dp.queries, instanceID, dp.dataDir, dp.org, dp.repo, instance.WorkingDirectory, &task); err != nil {
 			log.Printf("agent: failed to create sub-agent for issue #%d: %v", d.IssueNumber, err)
 			dp.queries.UpdateTaskStatus(ctx, sqlc.UpdateTaskStatusParams{
 				Status: "failed",
@@ -116,7 +119,7 @@ func (dp *DecisionProcessor) processNewTasks(ctx context.Context, instanceID str
 }
 
 func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instanceID string) {
-	decisions, err := memory.ReadCompletedTasks(dp.dataDir, instanceID)
+	decisions, err := memory.ReadRepoCompletedTasks(dp.dataDir, dp.org, dp.repo)
 	if err != nil {
 		log.Printf("agent: failed to read completed_tasks.json: %v", err)
 		return
@@ -141,14 +144,13 @@ func (dp *DecisionProcessor) processCompletedTasks(ctx context.Context, instance
 }
 
 func (dp *DecisionProcessor) processRestarts(ctx context.Context, instanceID string) {
-	decisions, err := memory.ReadRestartTasks(dp.dataDir, instanceID)
+	decisions, err := memory.ReadRepoRestartTasks(dp.dataDir, dp.org, dp.repo)
 	if err != nil {
 		log.Printf("agent: failed to read restart_tasks.json: %v", err)
 		return
 	}
 
 	for _, d := range decisions {
-		// Look up the task to get full details
 		tasks, err := dp.queries.ListActiveTasks(ctx, instanceID)
 		if err != nil {
 			log.Printf("agent: failed to list active tasks: %v", err)
@@ -157,37 +159,17 @@ func (dp *DecisionProcessor) processRestarts(ctx context.Context, instanceID str
 
 		for _, task := range tasks {
 			if task.ID == d.TaskID {
-				// Get workingDir from instance
 				instance, err := dp.queries.GetInstance(ctx, instanceID)
-				workingDir := ""
-				if err == nil {
-					workingDir = instance.WorkingDirectory
+				if err != nil {
+					log.Printf("agent: failed to get instance for restart: %v", err)
+					break
 				}
 
-				if err := RestartSubAgent(ctx, dp.client, dp.queries, instanceID, dp.dataDir, workingDir, &task, d.Reason); err != nil {
+				if err := RestartSubAgent(ctx, dp.client, dp.queries, instanceID, dp.dataDir, dp.org, dp.repo, instance.WorkingDirectory, &task, d.Reason); err != nil {
 					log.Printf("agent: failed to restart task %s: %v", d.TaskID, err)
 				}
 				break
 			}
 		}
 	}
-}
-
-func removeWorktree(dataDir, instanceID, branchName string) error {
-	worktreePath := memory.InstanceWorktreePath(dataDir, instanceID, branchName)
-
-	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-		return nil
-	}
-
-	// Get workingDir from instance to use as the base for git worktree remove
-	// We need to find a valid git repo to run the command
-	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git worktree remove failed: %w, output: %s", err, string(output))
-	}
-
-	log.Printf("agent: removed worktree at %s", worktreePath)
-	return nil
 }

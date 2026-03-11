@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -85,28 +86,45 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 		return
 	}
 
+	// Look up org/repo from DB
+	instance, err := h.queries.GetInstance(h.ctx, instanceID)
+	if err != nil {
+		log.Printf("agent: failed to get instance %s: %v", truncID(instanceID), err)
+		return
+	}
+	org := instance.Org
+	repo := instance.Repo
+
+	if org == "" || repo == "" {
+		log.Printf("agent: instance %s has no org/repo set, skipping agent", truncID(instanceID))
+		return
+	}
+
 	// Ensure global .flock directory layout
 	if err := memory.EnsureLayout(h.dataDir); err != nil {
 		log.Printf("agent: failed to ensure global layout: %v", err)
 	}
 
-	// Ensure instance-specific .flock directory layout
-	if err := memory.EnsureInstanceLayout(h.dataDir, instanceID); err != nil {
-		log.Printf("agent: failed to ensure instance layout for %s: %v", truncID(instanceID), err)
+	// Ensure repo-specific directory layout
+	if err := memory.EnsureRepoLayout(h.dataDir, org, repo); err != nil {
+		log.Printf("agent: failed to ensure repo layout for %s/%s: %v", org, repo, err)
 	}
 
+	// Attempt migration from old UUID-based paths
+	h.migrateIfNeeded(instanceID, org, repo)
+
 	// Check if heartbeat needs upgrade
-	if err := h.upgradeHeartbeatIfNeeded(instanceID); err != nil {
+	if err := h.upgradeHeartbeatIfNeeded(instanceID, org, repo); err != nil {
 		log.Printf("agent: heartbeat upgrade failed for %s: %v", truncID(instanceID), err)
 	}
 
-	orch := NewOrchestrator(h.client, h.queries, instanceID, h.dataDir, h.cfg, h.subscribeFn)
-	proc := NewDecisionProcessor(h.client, h.queries, h.dataDir, instanceID, h.cfg)
+	orch := NewOrchestrator(h.client, h.queries, instanceID, h.dataDir, org, repo, h.cfg, h.subscribeFn)
+	proc := NewDecisionProcessor(h.client, h.queries, h.dataDir, instanceID, org, repo, h.cfg)
 	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, h.queries, h.client)
 	sched.Start(h.ctx)
 
 	h.schedulers[instanceID] = sched
-	log.Printf("agent: started scheduler for instance %s", truncID(instanceID))
+	log.Printf("agent: started scheduler for instance %s (%s/%s)", truncID(instanceID), org, repo)
 }
 
 // StopInstance stops the heartbeat loop for an instance.
@@ -122,7 +140,6 @@ func (h *Harness) StopInstance(instanceID string) {
 }
 
 // HandleEvent processes a raw SSE event to update activity tracking.
-// Should be called from the event handler chain in main.go.
 func (h *Harness) HandleEvent(instanceID, rawJSON string) {
 	var env struct {
 		Type       string `json:"type"`
@@ -151,15 +168,11 @@ func (h *Harness) HandleEvent(instanceID, rawJSON string) {
 		return
 	}
 
-	// Record activity for stuck detection
 	h.tracker.RecordActivity(sessionID)
-
-	// Update task activity in DB for any session that has a task
 	h.updateTaskActivityForSession(sessionID)
 }
 
 func (h *Harness) updateTaskActivityForSession(sessionID string) {
-	// Find tasks with this session ID and update their activity
 	h.mu.RLock()
 	instanceIDs := make([]string, 0, len(h.schedulers))
 	for id := range h.schedulers {
@@ -187,9 +200,26 @@ func (h *Harness) Enabled() bool {
 	return h.cfg.Enabled
 }
 
+// migrateIfNeeded checks if old UUID-based directories exist and migrates them.
+func (h *Harness) migrateIfNeeded(instanceID, org, repo string) {
+	oldInstanceDir := memory.InstanceMemoryPath(h.dataDir, instanceID)
+
+	info, err := os.Stat(oldInstanceDir)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	log.Printf("agent: migrating instance %s to %s/%s", truncID(instanceID), org, repo)
+	if err := memory.MigrateInstanceToRepo(h.dataDir, instanceID, org, repo); err != nil {
+		log.Printf("agent: migration failed for %s: %v", truncID(instanceID), err)
+	} else {
+		log.Printf("agent: migration completed for %s → %s/%s", truncID(instanceID), org, repo)
+	}
+}
+
 // upgradeHeartbeatIfNeeded checks if the heartbeat template has been updated
 // and upgrades it if necessary using OpenCode to merge the changes.
-func (h *Harness) upgradeHeartbeatIfNeeded(instanceID string) error {
+func (h *Harness) upgradeHeartbeatIfNeeded(instanceID, org, repo string) error {
 	ctx := context.Background()
 	currentHash := memory.TemplateHash()
 
@@ -217,7 +247,7 @@ func (h *Harness) upgradeHeartbeatIfNeeded(instanceID string) error {
 
 	log.Printf("agent: heartbeat template changed for instance %s, upgrading", truncID(instanceID))
 
-	prompt, err := memory.HeartbeatUpgradePrompt(h.dataDir, instanceID)
+	prompt, err := memory.HeartbeatUpgradePrompt(h.dataDir, org, repo)
 	if err != nil {
 		return fmt.Errorf("generate upgrade prompt: %w", err)
 	}
