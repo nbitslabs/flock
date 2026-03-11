@@ -6,7 +6,6 @@ FLOCK_REPO="https://github.com/nbitslabs/flock.git"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 SKIP_AUTH="${SKIP_AUTH:-false}"
 DOMAIN=""
-SSL_EMAIL=""
 
 log() {
     echo "[flock-install] $1"
@@ -516,14 +515,7 @@ setup_ssl() {
     
     log "Requesting SSL certificate..."
 
-    local certbot_args=(--nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect)
-    if [[ -n "$SSL_EMAIL" ]]; then
-        certbot_args+=(--email "$SSL_EMAIL")
-    else
-        certbot_args+=(--register-unsafely-without-email)
-    fi
-
-    sudo certbot "${certbot_args[@]}"
+    sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --redirect --register-unsafely-without-email
     
     log "SSL certificate configured"
     
@@ -678,10 +670,6 @@ prompt_config() {
     read -p "Domain for reverse proxy (leave blank to skip): " input_domain < /dev/tty
     DOMAIN="${input_domain:-}"
 
-    if [[ -n "$DOMAIN" ]]; then
-        read -p "Email for SSL certificate (Let's Encrypt): " input_email < /dev/tty
-        SSL_EMAIL="${input_email:-}"
-    fi
 
     echo ""
     echo "Configure Flock basic authentication:"
