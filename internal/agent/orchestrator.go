@@ -125,10 +125,17 @@ func (o *Orchestrator) createOrchestratorSession(ctx context.Context) (*sqlc.Orc
 }
 
 func (o *Orchestrator) composeBootstrapMessage() string {
+	repoStatePath := memory.RepoStatePath(o.dataDir, o.org, o.repo)
+	decisionsPath := memory.RepoDecisionsPath(o.dataDir, o.org, o.repo)
+
 	var sb strings.Builder
 
 	heartbeat, err := memory.ReadRepoHeartbeat(o.dataDir, o.org, o.repo)
 	if err == nil && heartbeat != "" {
+		// Replace template placeholders with real paths so the orchestrator
+		// can act on the bootstrap message without waiting for a heartbeat.
+		heartbeat = strings.ReplaceAll(heartbeat, "{decisionsPath}", decisionsPath)
+		heartbeat = strings.ReplaceAll(heartbeat, "{repoStatePath}", repoStatePath)
 		sb.WriteString("# Heartbeat Instructions\n\n")
 		sb.WriteString(heartbeat)
 		sb.WriteString("\n\n")
@@ -152,8 +159,13 @@ func (o *Orchestrator) composeBootstrapMessage() string {
 	}
 
 	return fmt.Sprintf("You are the orchestrator AI. Read and internalize these instructions. "+
-		"You will receive periodic heartbeat messages. Your working directory is: %s\n\n%s"+
-		"Acknowledge that you understand your role.", workingDir, sb.String())
+		"You will receive periodic heartbeat messages. Your working directory is: %s\n\n"+
+		"## Key Paths\n"+
+		"- Repo state: `%s`\n"+
+		"- Decisions: `%s`\n"+
+		"- Memory: `%s/MEMORY.md`\n\n%s"+
+		"Acknowledge that you understand your role.",
+		workingDir, repoStatePath, decisionsPath, repoStatePath, sb.String())
 }
 
 // SendHeartbeat sends a heartbeat message to the orchestrator session and
