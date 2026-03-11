@@ -61,8 +61,10 @@ install_golang() {
 
     local go_version="1.24.7"
     local go_archive="go${go_version}.${go_os}-${arch}.tar.gz"
-    
-    curl -sL "https://go.dev/dl/${go_archive}" -o "/tmp/${go_archive}"
+    local go_url="https://go.dev/dl/${go_archive}"
+
+    log "Downloading ${go_archive}..."
+    curl -fSL "$go_url" -o "/tmp/${go_archive}"
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf "/tmp/${go_archive}"
     rm "/tmp/${go_archive}"
