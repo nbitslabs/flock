@@ -357,7 +357,7 @@ authenticate_github() {
 
     if [[ "$gh_auth_choice" =~ ^[Yy]$ ]]; then
         log "Please authenticate with GitHub CLI..."
-        gh auth login
+        gh auth login < /dev/tty
         log "GitHub CLI authenticated"
     else
         log "Skipping GitHub authentication. Run 'gh auth login' later."
@@ -365,27 +365,8 @@ authenticate_github() {
 }
 
 authenticate_opencode() {
-    if [[ "$SKIP_AUTH" == "true" ]]; then
-        log "Skipping OpenCode authentication (SKIP_AUTH=true)"
-        return 0
-    fi
-
-    if [[ "$NON_INTERACTIVE" == "true" ]]; then
-        log "OpenCode requires authentication. Run: opencode auth login"
-        return 0
-    fi
-
-    echo ""
-    read -p "Would you like to authenticate OpenCode now? (Y/n): " oc_auth_choice < /dev/tty
-    oc_auth_choice="${oc_auth_choice:-Y}"
-
-    if [[ "$oc_auth_choice" =~ ^[Yy]$ ]]; then
-        log "Please authenticate with OpenCode..."
-        "${INSTALL_DIR}/bin/opencode" auth login
-        log "OpenCode authenticated"
-    else
-        log "Skipping OpenCode authentication. Run 'opencode auth login' later."
-    fi
+    log "OpenCode requires manual authentication (TUI-based)."
+    log "After installation, run: opencode auth login"
 }
 
 setup_flock_auth() {
