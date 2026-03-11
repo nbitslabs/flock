@@ -166,7 +166,7 @@ opencode_url = "http://127.0.0.1:4096"
 addr = ":7070"
 db = "${INSTALL_DIR}/flock.db"
 data_dir = "${INSTALL_DIR}"
-base_path = "${INSTALL_DIR}/worktrees"
+base_path = "${HOME}/dev"
 
 [agent]
 enabled = true
