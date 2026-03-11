@@ -82,21 +82,40 @@ install_golang() {
     log "Go installed successfully"
 }
 
+install_git() {
+    if command -v git &> /dev/null; then
+        log "Git already installed"
+        return 0
+    fi
+
+    log "Installing Git..."
+    local pkg_manager
+    pkg_manager=$(detect_package_manager)
+
+    case "$pkg_manager" in
+        apt)  sudo apt-get install -y git;;
+        yum)  sudo yum install -y git;;
+        brew) brew install git;;
+        *)    log "ERROR: Cannot install git, unknown package manager"; return 1;;
+    esac
+}
+
 install_github_cli() {
     if command -v gh &> /dev/null; then
         log "GitHub CLI already installed"
         return 0
     fi
-    
+
     log "Installing GitHub CLI..."
     local os_type
     os_type=$(detect_os)
-    
+
     if [[ "$os_type" == "macos" ]]; then
         brew install gh
     else
         curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt-get update -y
         sudo apt-get install -y gh
     fi
 }
@@ -736,6 +755,7 @@ main() {
 
     update_package_index
 
+    install_git
     install_golang
     install_github_cli
     install_opencode
