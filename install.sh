@@ -174,7 +174,7 @@ create_opencode_config() {
     
     mkdir -p "${INSTALL_DIR}/opencode"
     
-    cat > "${INSTALL_DIR}/opencode/config.json" << EOF
+    cat > "${INSTALL_DIR}/opencode/config.json" << 'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
   "server": {
@@ -346,7 +346,7 @@ authenticate_github() {
     fi
 
     echo ""
-    read -p "Would you like to authenticate GitHub CLI now? (Y/n): " gh_auth_choice
+    read -p "Would you like to authenticate GitHub CLI now? (Y/n): " gh_auth_choice < /dev/tty
     gh_auth_choice="${gh_auth_choice:-Y}"
 
     if [[ "$gh_auth_choice" =~ ^[Yy]$ ]]; then
@@ -370,7 +370,7 @@ authenticate_opencode() {
     fi
 
     echo ""
-    read -p "Would you like to authenticate OpenCode now? (Y/n): " oc_auth_choice
+    read -p "Would you like to authenticate OpenCode now? (Y/n): " oc_auth_choice < /dev/tty
     oc_auth_choice="${oc_auth_choice:-Y}"
 
     if [[ "$oc_auth_choice" =~ ^[Yy]$ ]]; then
@@ -387,30 +387,14 @@ setup_flock_auth() {
         log "Skipping Flock auth setup (SKIP_AUTH=true)"
         return 0
     fi
-    
-    if [[ "$NON_INTERACTIVE" == "true" ]]; then
-        if [[ -z "${FLOCK_USERNAME:-}" ]] || [[ -z "${FLOCK_PASSWORD:-}" ]]; then
-            log "FLOCK_USERNAME and FLOCK_PASSWORD environment variables required in non-interactive mode"
-            return 1
-        fi
-    else
-        echo ""
-        echo "Configure Flock basic authentication (optional - press Enter to skip):"
-        read -p "Username: " username
-        read -s -p "Password: " password
-        echo ""
-        
-        FLOCK_USERNAME="$username"
-        FLOCK_PASSWORD="$password"
-    fi
-    
-    if [[ -n "$FLOCK_USERNAME" ]] && [[ -n "$FLOCK_PASSWORD" ]]; then
+
+    if [[ -n "${FLOCK_USERNAME:-}" ]] && [[ -n "${FLOCK_PASSWORD:-}" ]]; then
         log "Setting up Flock basic authentication..."
-        
+
         sed -i.bak "s/username = \"\"/username = \"$FLOCK_USERNAME\"/" "${INSTALL_DIR}/flock.toml"
         sed -i.bak "s/password = \"\"/password = \"$FLOCK_PASSWORD\"/" "${INSTALL_DIR}/flock.toml"
         rm -f "${INSTALL_DIR}/flock.toml.bak"
-        
+
         log "Flock auth configured"
     else
         log "Flock auth skipped (no credentials provided)"
@@ -684,11 +668,51 @@ print_summary() {
     echo ""
 }
 
+prompt_config() {
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        return 0
+    fi
+
+    echo ""
+    echo "============================================"
+    echo "  Flock Installer"
+    echo "============================================"
+    echo ""
+
+    read -p "Install directory [${INSTALL_DIR}]: " input_install_dir < /dev/tty
+    if [[ -n "$input_install_dir" ]]; then
+        INSTALL_DIR="$input_install_dir"
+    fi
+
+    read -p "Domain for reverse proxy (leave blank to skip): " input_domain < /dev/tty
+    DOMAIN="${input_domain:-}"
+
+    echo ""
+    echo "Configure Flock basic authentication:"
+    read -p "Username: " input_username < /dev/tty
+    if [[ -n "$input_username" ]]; then
+        read -s -p "Password: " input_password < /dev/tty
+        echo ""
+        FLOCK_USERNAME="$input_username"
+        FLOCK_PASSWORD="${input_password:-}"
+    else
+        FLOCK_USERNAME=""
+        FLOCK_PASSWORD=""
+        log "Flock auth skipped (no username provided)"
+    fi
+
+    echo ""
+    log "Install directory: ${INSTALL_DIR}"
+    if [[ -n "$DOMAIN" ]]; then
+        log "Domain: ${DOMAIN}"
+    fi
+    echo ""
+}
+
 main() {
     log "Starting Flock installation..."
-    log "Install directory: ${INSTALL_DIR}"
     log "OS: $(detect_os)"
-    
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --install-dir)
@@ -713,33 +737,35 @@ main() {
                 ;;
         esac
     done
-    
+
+    prompt_config
+
     mkdir -p "${INSTALL_DIR}/bin"
     mkdir -p "${INSTALL_DIR}/logs"
-    
+
     install_golang
     install_github_cli
     install_opencode
-    
+
     download_flock
     build_flock
-    
+
     create_flock_config
     create_opencode_config
-    
+
+    setup_flock_auth
+
     setup_services
     start_services
-    
+
     authenticate_github
     authenticate_opencode
 
-    setup_flock_auth
-    
     setup_reverse_proxy
     setup_ssl
-    
+
     setup_cronjob
-    
+
     add_to_path
     verify_installation
     print_summary
