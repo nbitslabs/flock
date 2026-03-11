@@ -53,7 +53,11 @@ install_golang() {
     esac
     local arch
     arch=$(uname -m)
-    [[ "$arch" == "x86_64" ]] && arch="amd64" || [[ "$arch" == "arm64" ]] && arch="arm64"
+    case "$arch" in
+        x86_64)  arch="amd64";;
+        aarch64) arch="arm64";;
+        arm64)   arch="arm64";;
+    esac
 
     local go_version="1.24.7"
     local go_archive="go${go_version}.${go_os}-${arch}.tar.gz"
@@ -98,8 +102,10 @@ install_opencode() {
     os_type=$(detect_os)
     local arch
     arch=$(uname -m)
-    [[ "$arch" == "x86_64" ]] && arch="x86_64" || [[ "$arch" == "arm64" ]] && arch="arm64"
-    
+    case "$arch" in
+        aarch64) arch="arm64";;
+    esac
+
     local opencode_url
     opencode_url="https://github.com/opencodeai/opencode/releases/latest/download/opencode-${os_type}-${arch}"
     
