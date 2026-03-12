@@ -73,6 +73,11 @@ func cloneOrGetRepo(basePath, org, repo string) (string, error) {
 		return "", err
 	}
 
+	// Ensure GitHub SSH host key is whitelisted before clone
+	if err := ensureGitHubHostKey(basePath); err != nil {
+		return "", err
+	}
+
 	gitURL := "git@github.com:" + org + "/" + repo + ".git"
 	cmd := exec.Command("git", "clone", "--depth", "1", gitURL, repoPath)
 	cmd.Dir = orgPath
@@ -81,6 +86,44 @@ func cloneOrGetRepo(basePath, org, repo string) (string, error) {
 	}
 
 	return repoPath, nil
+}
+
+// ensureGitHubHostKey adds GitHub's SSH host key to known_hosts if not already present.
+// This prevents "Host key verification failed" errors on fresh installations.
+func ensureGitHubHostKey(basePath string) error {
+	knownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
+
+	// Create .ssh directory if it doesn't exist
+	sshDir := filepath.Join(os.Getenv("HOME"), ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return err
+	}
+
+	// Check if github.com is already in known_hosts
+	if data, err := os.ReadFile(knownHostsPath); err == nil {
+		if strings.Contains(string(data), "github.com") {
+			return nil
+		}
+	}
+
+	// Add github.com host key to known_hosts
+	cmd := exec.Command("ssh-keyscan", "github.com")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(knownHostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := f.Write(out); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
