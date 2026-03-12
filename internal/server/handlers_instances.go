@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nbitslabs/flock/internal/db/sqlc"
+	"github.com/nbitslabs/flock/internal/ssh"
 )
 
 func expandHome(path string) string {
@@ -66,6 +68,10 @@ func cloneOrGetRepo(basePath, org, repo string) (string, error) {
 		return repoPath, nil
 	} else if !os.IsNotExist(err) {
 		return "", err
+	}
+
+	if err := ssh.EnsureGitHubHostKey(); err != nil {
+		return "", fmt.Errorf("failed to ensure GitHub SSH host key: %w", err)
 	}
 
 	orgPath := filepath.Join(basePath, "github.com", org)
