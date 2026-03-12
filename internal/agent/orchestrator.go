@@ -176,11 +176,10 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 		return fmt.Errorf("ensure session: %w", err)
 	}
 
-	if justCreated {
-		log.Printf("agent: session just bootstrapped, skipping duplicate heartbeat")
-		return nil
-	}
-
+	// Always send a heartbeat message, even if the session was just bootstrapped.
+	// The orchestrator needs to receive heartbeat instructions to write decision
+	// files (new_tasks.json, etc.). Without this, ProcessDecisions would run
+	// immediately but find no decision files to process.
 	msg := o.composeHeartbeatMessage(ctx)
 
 	if err := o.client.SendMessage(ctx, orch.SessionID, msg, ""); err != nil {
@@ -190,10 +189,18 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("recreate session after send failure: %w", err)
 		}
-		return nil
+		// Retry sending heartbeat to the new session
+		msg = o.composeHeartbeatMessage(ctx)
+		if err := o.client.SendMessage(ctx, orch.SessionID, msg, ""); err != nil {
+			return fmt.Errorf("retry heartbeat after recreation: %w", err)
+		}
 	}
 
-	o.queries.IncrementHeartbeatCount(ctx, orch.ID)
+	// Only increment heartbeat count for non-bootstrap heartbeats.
+	// When justCreated is true, this is the bootstrap heartbeat, not a regular one.
+	if !justCreated {
+		o.queries.IncrementHeartbeatCount(ctx, orch.ID)
+	}
 
 	if err := o.waitForIdle(ctx, orch.SessionID); err != nil {
 		return fmt.Errorf("wait for idle: %w", err)
