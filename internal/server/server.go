@@ -106,6 +106,11 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/memory/query", s.handleMemoryQuery)
 	s.mux.HandleFunc("GET /api/memory/categories", s.handleListMemoryCategories)
 
+	// Dashboard API
+	s.mux.HandleFunc("GET /api/dashboard/tasks", s.handleDashboardTasks)
+	s.mux.HandleFunc("GET /api/dashboard/worktrees", s.handleDashboardWorktrees)
+	s.mux.HandleFunc("GET /api/dashboard/memory-stats", s.handleDashboardMemoryStats)
+
 	// Flock Agent API
 	s.mux.HandleFunc("GET /api/flock-agent", s.handleGetFlockAgentSession)
 	s.mux.HandleFunc("POST /api/flock-agent", s.handleCreateFlockAgentSession)
