@@ -6,6 +6,7 @@ package sqlc
 
 import (
 	"database/sql"
+	"time"
 )
 
 type AuthSession struct {
@@ -35,6 +36,35 @@ type Instance struct {
 	HeartbeatHash    string
 	Org              string
 	Repo             string
+}
+
+type MemoryIndexMetum struct {
+	Path        string
+	Category    string
+	Title       string
+	Tags        string
+	ContentHash string
+	IndexedAt   string
+	UpdatedAt   string
+}
+
+type MemorySearchIndex struct {
+	Path     string
+	Title    string
+	Category string
+	Tags     string
+	Content  string
+}
+
+type MemoryVersion struct {
+	ID          string
+	Path        string
+	Version     int64
+	Content     string
+	ContentHash string
+	Author      string
+	Reason      string
+	CreatedAt   string
 }
 
 type OrchestratorSession struct {
@@ -72,6 +102,25 @@ type Task struct {
 	LastActivityAt string
 	CreatedAt      string
 	UpdatedAt      string
+}
+
+type TestFailure struct {
+	ID             string
+	InstanceID     string
+	SessionID      sql.NullString
+	Framework      string
+	TestName       string
+	FilePath       sql.NullString
+	AssertionText  sql.NullString
+	StackTrace     sql.NullString
+	InputValues    sql.NullString
+	ErrorMessage   string
+	CodeChanges    sql.NullString
+	Resolved       bool
+	ResolvedAt     sql.NullTime
+	FixDescription sql.NullString
+	FixDiff        sql.NullString
+	CreatedAt      time.Time
 }
 
 type WorktreeHealthCheck struct {

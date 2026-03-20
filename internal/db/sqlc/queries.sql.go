@@ -32,6 +32,23 @@ func (q *Queries) CountAllActiveTasks(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countFailuresByTestName = `-- name: CountFailuresByTestName :one
+SELECT COUNT(*) FROM test_failures
+WHERE instance_id = ? AND test_name = ?
+`
+
+type CountFailuresByTestNameParams struct {
+	InstanceID string
+	TestName   string
+}
+
+func (q *Queries) CountFailuresByTestName(ctx context.Context, arg CountFailuresByTestNameParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countFailuresByTestName, arg.InstanceID, arg.TestName)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAuthSession = `-- name: CreateAuthSession :one
 
 INSERT INTO auth_sessions (token, username, expires_at)
@@ -269,6 +286,64 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.LastActivityAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createTestFailure = `-- name: CreateTestFailure :one
+
+INSERT INTO test_failures (id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at
+`
+
+type CreateTestFailureParams struct {
+	ID            string
+	InstanceID    string
+	SessionID     sql.NullString
+	Framework     string
+	TestName      string
+	FilePath      sql.NullString
+	AssertionText sql.NullString
+	StackTrace    sql.NullString
+	InputValues   sql.NullString
+	ErrorMessage  string
+	CodeChanges   sql.NullString
+}
+
+// Test failure queries
+func (q *Queries) CreateTestFailure(ctx context.Context, arg CreateTestFailureParams) (TestFailure, error) {
+	row := q.db.QueryRowContext(ctx, createTestFailure,
+		arg.ID,
+		arg.InstanceID,
+		arg.SessionID,
+		arg.Framework,
+		arg.TestName,
+		arg.FilePath,
+		arg.AssertionText,
+		arg.StackTrace,
+		arg.InputValues,
+		arg.ErrorMessage,
+		arg.CodeChanges,
+	)
+	var i TestFailure
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.SessionID,
+		&i.Framework,
+		&i.TestName,
+		&i.FilePath,
+		&i.AssertionText,
+		&i.StackTrace,
+		&i.InputValues,
+		&i.ErrorMessage,
+		&i.CodeChanges,
+		&i.Resolved,
+		&i.ResolvedAt,
+		&i.FixDescription,
+		&i.FixDiff,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -629,6 +704,34 @@ func (q *Queries) GetTaskByIssue(ctx context.Context, arg GetTaskByIssueParams) 
 	return i, err
 }
 
+const getTestFailure = `-- name: GetTestFailure :one
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures WHERE id = ?
+`
+
+func (q *Queries) GetTestFailure(ctx context.Context, id string) (TestFailure, error) {
+	row := q.db.QueryRowContext(ctx, getTestFailure, id)
+	var i TestFailure
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.SessionID,
+		&i.Framework,
+		&i.TestName,
+		&i.FilePath,
+		&i.AssertionText,
+		&i.StackTrace,
+		&i.InputValues,
+		&i.ErrorMessage,
+		&i.CodeChanges,
+		&i.Resolved,
+		&i.ResolvedAt,
+		&i.FixDescription,
+		&i.FixDiff,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWorktreeByBranch = `-- name: GetWorktreeByBranch :one
 SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
 WHERE instance_id = ? AND branch_name = ? AND status = 'active'
@@ -952,6 +1055,111 @@ func (q *Queries) ListFailedTasks(ctx context.Context, instanceID string) ([]Tas
 	return items, nil
 }
 
+const listFailuresByFramework = `-- name: ListFailuresByFramework :many
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures
+WHERE instance_id = ? AND framework = ?
+ORDER BY created_at DESC
+LIMIT ?
+`
+
+type ListFailuresByFrameworkParams struct {
+	InstanceID string
+	Framework  string
+	Limit      int64
+}
+
+func (q *Queries) ListFailuresByFramework(ctx context.Context, arg ListFailuresByFrameworkParams) ([]TestFailure, error) {
+	rows, err := q.db.QueryContext(ctx, listFailuresByFramework, arg.InstanceID, arg.Framework, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestFailure
+	for rows.Next() {
+		var i TestFailure
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.SessionID,
+			&i.Framework,
+			&i.TestName,
+			&i.FilePath,
+			&i.AssertionText,
+			&i.StackTrace,
+			&i.InputValues,
+			&i.ErrorMessage,
+			&i.CodeChanges,
+			&i.Resolved,
+			&i.ResolvedAt,
+			&i.FixDescription,
+			&i.FixDiff,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFailuresByTestName = `-- name: ListFailuresByTestName :many
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures
+WHERE test_name = ?
+ORDER BY created_at DESC
+LIMIT ?
+`
+
+type ListFailuresByTestNameParams struct {
+	TestName string
+	Limit    int64
+}
+
+func (q *Queries) ListFailuresByTestName(ctx context.Context, arg ListFailuresByTestNameParams) ([]TestFailure, error) {
+	rows, err := q.db.QueryContext(ctx, listFailuresByTestName, arg.TestName, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestFailure
+	for rows.Next() {
+		var i TestFailure
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.SessionID,
+			&i.Framework,
+			&i.TestName,
+			&i.FilePath,
+			&i.AssertionText,
+			&i.StackTrace,
+			&i.InputValues,
+			&i.ErrorMessage,
+			&i.CodeChanges,
+			&i.Resolved,
+			&i.ResolvedAt,
+			&i.FixDescription,
+			&i.FixDiff,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHealthChecksByWorktree = `-- name: ListHealthChecksByWorktree :many
 SELECT id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message, checked_at FROM worktree_health_checks
 WHERE worktree_id = ?
@@ -1015,6 +1223,58 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 			&i.HeartbeatHash,
 			&i.Org,
 			&i.Repo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listResolvedFailures = `-- name: ListResolvedFailures :many
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures
+WHERE instance_id = ? AND resolved = TRUE
+ORDER BY resolved_at DESC
+LIMIT ?
+`
+
+type ListResolvedFailuresParams struct {
+	InstanceID string
+	Limit      int64
+}
+
+func (q *Queries) ListResolvedFailures(ctx context.Context, arg ListResolvedFailuresParams) ([]TestFailure, error) {
+	rows, err := q.db.QueryContext(ctx, listResolvedFailures, arg.InstanceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestFailure
+	for rows.Next() {
+		var i TestFailure
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.SessionID,
+			&i.Framework,
+			&i.TestName,
+			&i.FilePath,
+			&i.AssertionText,
+			&i.StackTrace,
+			&i.InputValues,
+			&i.ErrorMessage,
+			&i.CodeChanges,
+			&i.Resolved,
+			&i.ResolvedAt,
+			&i.FixDescription,
+			&i.FixDiff,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1150,6 +1410,121 @@ func (q *Queries) ListTasksByInstance(ctx context.Context, instanceID string) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const listTestFailuresByInstance = `-- name: ListTestFailuresByInstance :many
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures
+WHERE instance_id = ?
+ORDER BY created_at DESC
+LIMIT ?
+`
+
+type ListTestFailuresByInstanceParams struct {
+	InstanceID string
+	Limit      int64
+}
+
+func (q *Queries) ListTestFailuresByInstance(ctx context.Context, arg ListTestFailuresByInstanceParams) ([]TestFailure, error) {
+	rows, err := q.db.QueryContext(ctx, listTestFailuresByInstance, arg.InstanceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestFailure
+	for rows.Next() {
+		var i TestFailure
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.SessionID,
+			&i.Framework,
+			&i.TestName,
+			&i.FilePath,
+			&i.AssertionText,
+			&i.StackTrace,
+			&i.InputValues,
+			&i.ErrorMessage,
+			&i.CodeChanges,
+			&i.Resolved,
+			&i.ResolvedAt,
+			&i.FixDescription,
+			&i.FixDiff,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnresolvedFailures = `-- name: ListUnresolvedFailures :many
+SELECT id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes, resolved, resolved_at, fix_description, fix_diff, created_at FROM test_failures
+WHERE instance_id = ? AND resolved = FALSE
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListUnresolvedFailures(ctx context.Context, instanceID string) ([]TestFailure, error) {
+	rows, err := q.db.QueryContext(ctx, listUnresolvedFailures, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TestFailure
+	for rows.Next() {
+		var i TestFailure
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.SessionID,
+			&i.Framework,
+			&i.TestName,
+			&i.FilePath,
+			&i.AssertionText,
+			&i.StackTrace,
+			&i.InputValues,
+			&i.ErrorMessage,
+			&i.CodeChanges,
+			&i.Resolved,
+			&i.ResolvedAt,
+			&i.FixDescription,
+			&i.FixDiff,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveTestFailure = `-- name: ResolveTestFailure :exec
+UPDATE test_failures
+SET resolved = TRUE, resolved_at = datetime('now', 'utc'), fix_description = ?, fix_diff = ?
+WHERE id = ?
+`
+
+type ResolveTestFailureParams struct {
+	FixDescription sql.NullString
+	FixDiff        sql.NullString
+	ID             string
+}
+
+func (q *Queries) ResolveTestFailure(ctx context.Context, arg ResolveTestFailureParams) error {
+	_, err := q.db.ExecContext(ctx, resolveTestFailure, arg.FixDescription, arg.FixDiff, arg.ID)
+	return err
 }
 
 const retireFlockAgentSession = `-- name: RetireFlockAgentSession :exec

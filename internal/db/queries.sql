@@ -242,3 +242,51 @@ DELETE FROM auth_sessions WHERE token = ?;
 
 -- name: DeleteExpiredAuthSessions :exec
 DELETE FROM auth_sessions WHERE expires_at <= datetime('now');
+
+-- Test failure queries
+
+-- name: CreateTestFailure :one
+INSERT INTO test_failures (id, instance_id, session_id, framework, test_name, file_path, assertion_text, stack_trace, input_values, error_message, code_changes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: GetTestFailure :one
+SELECT * FROM test_failures WHERE id = ?;
+
+-- name: ListTestFailuresByInstance :many
+SELECT * FROM test_failures
+WHERE instance_id = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+-- name: ListUnresolvedFailures :many
+SELECT * FROM test_failures
+WHERE instance_id = ? AND resolved = FALSE
+ORDER BY created_at DESC;
+
+-- name: ListFailuresByTestName :many
+SELECT * FROM test_failures
+WHERE test_name = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+-- name: ListFailuresByFramework :many
+SELECT * FROM test_failures
+WHERE instance_id = ? AND framework = ?
+ORDER BY created_at DESC
+LIMIT ?;
+
+-- name: ResolveTestFailure :exec
+UPDATE test_failures
+SET resolved = TRUE, resolved_at = datetime('now', 'utc'), fix_description = ?, fix_diff = ?
+WHERE id = ?;
+
+-- name: ListResolvedFailures :many
+SELECT * FROM test_failures
+WHERE instance_id = ? AND resolved = TRUE
+ORDER BY resolved_at DESC
+LIMIT ?;
+
+-- name: CountFailuresByTestName :one
+SELECT COUNT(*) FROM test_failures
+WHERE instance_id = ? AND test_name = ?;
