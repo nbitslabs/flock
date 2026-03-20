@@ -36,3 +36,4 @@ flock.toml
 flock.db*
 
 .flock
+.mcp.json
