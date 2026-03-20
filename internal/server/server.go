@@ -101,6 +101,11 @@ func (s *Server) setupRoutes() {
 	// Question API (proxied to OpenCode)
 	s.mux.HandleFunc("POST /api/questions/{requestID}/reply", s.handleReplyToQuestion)
 
+	// Memory API
+	s.mux.HandleFunc("GET /api/memory/query", s.handleMemoryQuery)
+	s.mux.HandleFunc("POST /api/memory/query", s.handleMemoryQuery)
+	s.mux.HandleFunc("GET /api/memory/categories", s.handleListMemoryCategories)
+
 	// Flock Agent API
 	s.mux.HandleFunc("GET /api/flock-agent", s.handleGetFlockAgentSession)
 	s.mux.HandleFunc("POST /api/flock-agent", s.handleCreateFlockAgentSession)

@@ -172,7 +172,7 @@ author: test-agent
 
 # Content here
 `
-	fm, errors := parseFrontmatter(content)
+	fm, errors := ParseFrontmatter(content)
 	if len(errors) > 0 {
 		t.Errorf("unexpected errors: %v", errors)
 	}

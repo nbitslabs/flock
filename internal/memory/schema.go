@@ -170,7 +170,7 @@ func ValidateMemoryFile(content, category string) ValidationResult {
 	}
 
 	// Parse frontmatter
-	fm, fmErrors := parseFrontmatter(content)
+	fm, fmErrors := ParseFrontmatter(content)
 	result.Errors = append(result.Errors, fmErrors...)
 
 	// Validate required frontmatter fields
@@ -208,9 +208,9 @@ func ValidateMemoryFile(content, category string) ValidationResult {
 	return result
 }
 
-// parseFrontmatter extracts YAML frontmatter from markdown content.
+// ParseFrontmatter extracts YAML frontmatter from markdown content.
 // Returns field map and any parse errors.
-func parseFrontmatter(content string) (Frontmatter, []ValidationError) {
+func ParseFrontmatter(content string) (Frontmatter, []ValidationError) {
 	fm := make(Frontmatter)
 	var errors []ValidationError
 
