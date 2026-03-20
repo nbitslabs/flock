@@ -391,6 +391,36 @@ func ClearDecisionFiles(dataDir, instanceID string) {
 	os.Remove(filepath.Join(InstanceMemoryPath(dataDir, instanceID), completedFile))
 }
 
+// --- Group memory ---
+
+// GroupMemoryPath returns the directory for group-level memory.
+// e.g. {dataDir}/.flock/memory/groups/{groupName}
+func GroupMemoryPath(dataDir, groupName string) string {
+	return filepath.Join(ResolveStateDir(dataDir), "memory", "groups", groupName)
+}
+
+// ReadGroupMemory returns the MEMORY.md for a group.
+func ReadGroupMemory(dataDir, groupName string) (string, error) {
+	path := filepath.Join(GroupMemoryPath(dataDir, groupName), memoryFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
+}
+
+// WriteGroupMemory writes MEMORY.md for a group, creating directories as needed.
+func WriteGroupMemory(dataDir, groupName, content string) error {
+	dir := GroupMemoryPath(dataDir, groupName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir group memory %s: %w", dir, err)
+	}
+	return os.WriteFile(filepath.Join(dir, memoryFile), []byte(content), 0o644)
+}
+
 // --- Global memory ---
 
 // ReadGlobalMemory returns the global memory file from the data directory.

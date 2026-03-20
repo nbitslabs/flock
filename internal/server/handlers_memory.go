@@ -2,6 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nbitslabs/flock/internal/crossrepo"
 	"github.com/nbitslabs/flock/internal/memory"
 )
 
@@ -316,4 +320,235 @@ func extractSnippet(content, query string) string {
 	}
 
 	return snippet
+}
+
+// --- Cross-repo memory types ---
+
+type crossRepoMemoryResult struct {
+	memoryQueryResult
+	SourceRepo string  `json:"source_repo"`
+	Proximity  float64 `json:"proximity"`
+}
+
+type crossRepoMemoryRequest struct {
+	Group    string `json:"group"`
+	Query    string `json:"query"`
+	Category string `json:"category"`
+	Tag      string `json:"tag"`
+	Limit    int    `json:"limit"`
+}
+
+type crossRepoMemoryResponse struct {
+	Results    []crossRepoMemoryResult `json:"results"`
+	Total      int                     `json:"total"`
+	Group      string                  `json:"group"`
+	Categories []string                `json:"categories"`
+}
+
+// handleCrossRepoMemoryQuery searches memory across all repositories in a group,
+// annotating results with source repository and proximity-based ranking.
+func (s *Server) handleCrossRepoMemoryQuery(w http.ResponseWriter, r *http.Request) {
+	var req crossRepoMemoryRequest
+
+	if r.Method == "POST" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+	} else {
+		req.Group = r.URL.Query().Get("group")
+		req.Query = r.URL.Query().Get("q")
+		req.Category = r.URL.Query().Get("category")
+		req.Tag = r.URL.Query().Get("tag")
+	}
+
+	if req.Group == "" {
+		http.Error(w, `{"error":"group parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Limit <= 0 || req.Limit > 100 {
+		req.Limit = 20
+	}
+
+	// Find all repos in the group
+	manifests, err := s.queries.ListManifestsByGroup(r.Context(), req.Group)
+	if err != nil {
+		log.Printf("cross-repo memory: list manifests error: %v", err)
+		http.Error(w, `{"error":"failed to list group manifests"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if len(manifests) == 0 {
+		writeJSON(w, crossRepoMemoryResponse{
+			Results:    []crossRepoMemoryResult{},
+			Total:      0,
+			Group:      req.Group,
+			Categories: memory.ListCategories(),
+		})
+		return
+	}
+
+	// Build dependency graph for proximity scoring
+	manifestMap := make(map[string]*crossrepo.Manifest)
+	for _, m := range manifests {
+		key := fmt.Sprintf("%s/%s", m.Org, m.Repo)
+		parsed, err := crossrepo.ParseManifest(m.ManifestJson)
+		if err != nil {
+			continue
+		}
+		manifestMap[key] = parsed
+	}
+
+	var depGraph *crossrepo.DependencyGraph
+	if len(manifestMap) > 1 {
+		depGraph, _ = crossrepo.BuildDependencyGraph(manifestMap)
+	}
+
+	// Determine source repo for proximity if instance_id is provided
+	sourceKey := ""
+	if instanceID := r.URL.Query().Get("instance_id"); instanceID != "" {
+		inst, err := s.queries.GetInstance(r.Context(), instanceID)
+		if err == nil {
+			sourceKey = fmt.Sprintf("%s/%s", inst.Org, inst.Repo)
+		}
+	}
+
+	// Build a set of direct dependencies for the source repo
+	directDeps := make(map[string]bool)
+	if sourceKey != "" && depGraph != nil {
+		for _, dep := range depGraph.DependenciesOf(sourceKey) {
+			directDeps[dep] = true
+		}
+		// Also include direct consumers as close relationships
+		for _, consumer := range depGraph.ConsumersOf(sourceKey) {
+			directDeps[consumer] = true
+		}
+	}
+
+	// Search memory across all repos in the group
+	memReq := memoryQueryRequest{
+		Query:    req.Query,
+		Category: req.Category,
+		Tag:      req.Tag,
+		Limit:    100, // get more results before proximity filtering
+	}
+
+	var allResults []crossRepoMemoryResult
+	for _, m := range manifests {
+		repoResults := s.searchMemoryFiles(m.Org, m.Repo, memReq)
+		repoKey := fmt.Sprintf("%s/%s", m.Org, m.Repo)
+
+		for _, result := range repoResults {
+			proximity := computeProximity(sourceKey, repoKey, directDeps, depGraph)
+			allResults = append(allResults, crossRepoMemoryResult{
+				memoryQueryResult: result,
+				SourceRepo:        repoKey,
+				Proximity:         proximity,
+			})
+		}
+	}
+
+	// Sort by combined relevance (score) + proximity boost
+	sort.Slice(allResults, func(i, j int) bool {
+		scoreI := allResults[i].Score + allResults[i].Proximity
+		scoreJ := allResults[j].Score + allResults[j].Proximity
+		return scoreI > scoreJ
+	})
+
+	// Apply limit
+	if len(allResults) > req.Limit {
+		allResults = allResults[:req.Limit]
+	}
+
+	writeJSON(w, crossRepoMemoryResponse{
+		Results:    allResults,
+		Total:      len(allResults),
+		Group:      req.Group,
+		Categories: memory.ListCategories(),
+	})
+}
+
+// computeProximity returns a proximity boost score based on the relationship
+// between the source repo and the target repo in the dependency graph.
+func computeProximity(sourceKey, targetKey string, directDeps map[string]bool, graph *crossrepo.DependencyGraph) float64 {
+	if sourceKey == "" {
+		return 0
+	}
+	// Same repo gets highest boost
+	if sourceKey == targetKey {
+		return 10.0
+	}
+	// Direct dependency or consumer gets a strong boost
+	if directDeps[targetKey] {
+		return 5.0
+	}
+	// Transitive relationship gets a smaller boost
+	if graph != nil {
+		affected := graph.AffectedRepositories(targetKey)
+		for _, a := range affected {
+			if a == sourceKey {
+				return 2.0
+			}
+		}
+		affected = graph.AffectedRepositories(sourceKey)
+		for _, a := range affected {
+			if a == targetKey {
+				return 2.0
+			}
+		}
+	}
+	// Same group but no direct relationship
+	return 1.0
+}
+
+// handleGroupMemory handles reading and writing group-level memory.
+func (s *Server) handleGroupMemory(w http.ResponseWriter, r *http.Request) {
+	groupName := r.PathValue("group")
+	if groupName == "" {
+		http.Error(w, `{"error":"group name is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case "GET":
+		content, err := memory.ReadGroupMemory(s.dataDir, groupName)
+		if err != nil {
+			log.Printf("read group memory %s: %v", groupName, err)
+			http.Error(w, `{"error":"failed to read group memory"}`, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]string{
+			"group":   groupName,
+			"content": content,
+		})
+
+	case "PUT":
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+		if err != nil {
+			http.Error(w, `{"error":"failed to read request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := memory.WriteGroupMemory(s.dataDir, groupName, req.Content); err != nil {
+			log.Printf("write group memory %s: %v", groupName, err)
+			http.Error(w, `{"error":"failed to write group memory"}`, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]string{
+			"group":  groupName,
+			"status": "ok",
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
