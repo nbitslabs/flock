@@ -20,6 +20,7 @@ type Scheduler struct {
 	cleaner       *WorktreeCleaner
 	healthChecker *HealthChecker
 	recovery      *WorktreeRecovery
+	memoryTrigger *MemoryTrigger
 	queries       *sqlc.Queries
 	client        *opencode.Client
 	cancel        context.CancelFunc
@@ -34,6 +35,7 @@ func NewScheduler(
 	cleaner *WorktreeCleaner,
 	healthChecker *HealthChecker,
 	recovery *WorktreeRecovery,
+	memoryTrigger *MemoryTrigger,
 	queries *sqlc.Queries,
 	client *opencode.Client,
 ) *Scheduler {
@@ -46,6 +48,7 @@ func NewScheduler(
 		cleaner:       cleaner,
 		healthChecker: healthChecker,
 		recovery:      recovery,
+		memoryTrigger: memoryTrigger,
 		queries:       queries,
 		client:        client,
 	}
@@ -122,7 +125,17 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 		}
 	}
 
-	// 5. Run health checks every 2nd heartbeat (roughly every 10 minutes
+	// 5. Check for missing memory updates on completed tasks
+	if s.memoryTrigger != nil {
+		results := s.memoryTrigger.CheckCompletedTasks(ctx)
+		for _, r := range results {
+			if r.NeedsUpdate && r.FollowUpSent {
+				log.Printf("agent: memory-trigger: issue #%d needs memory update", r.IssueNumber)
+			}
+		}
+	}
+
+	// 6. Run health checks every 2nd heartbeat (roughly every 10 minutes
 	// with default 5-minute interval)
 	s.heartbeatNum++
 	if s.healthChecker != nil && s.heartbeatNum%2 == 0 {
