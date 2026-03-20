@@ -1643,6 +1643,682 @@
     });
 
     // =========================================================================
+    // Section 10 — Dashboard Views (Tasks, Worktrees, Memory)
+    // =========================================================================
+
+    store.currentNav = 'conversations';
+    store.dashboardTasks = [];
+    store.dashboardWorktrees = [];
+    store.dashboardMemoryStats = [];
+    store._dashboardTaskHash = '';
+    store._dashboardWorktreeHash = '';
+
+    function switchNav(view) {
+        store.currentNav = view;
+        const navBtns = document.querySelectorAll('[data-nav]');
+        const panels = ['sidebar-conversations', 'sidebar-tasks', 'sidebar-worktrees', 'sidebar-memory'];
+        navBtns.forEach(btn => {
+            const active = btn.dataset.nav === view;
+            btn.className = `flex-1 px-3 py-2 text-xs font-semibold ${active ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`;
+        });
+        panels.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.toggle('hidden', id !== `sidebar-${view}`);
+        });
+
+        // Load dashboard data when switching to a view
+        if (view === 'tasks') refreshDashboardTasks();
+        if (view === 'worktrees') refreshDashboardWorktrees();
+        if (view === 'memory') refreshDashboardMemory();
+
+        // Show/hide main content area based on view
+        const mainMessages = document.getElementById('messages');
+        const inputArea = document.getElementById('input-area');
+        const dashboardMain = document.getElementById('dashboard-main');
+        if (view === 'conversations') {
+            if (mainMessages) mainMessages.classList.remove('hidden');
+            if (inputArea && store.selectedSessionId) inputArea.classList.remove('hidden');
+            if (dashboardMain) dashboardMain.classList.add('hidden');
+        } else {
+            if (mainMessages) mainMessages.classList.add('hidden');
+            if (inputArea) inputArea.classList.add('hidden');
+            if (dashboardMain) dashboardMain.classList.remove('hidden');
+            renderDashboardMain(view);
+        }
+    }
+
+    function renderDashboardMain(view) {
+        let container = document.getElementById('dashboard-main');
+        if (!container) {
+            container = h('div', { id: 'dashboard-main', className: 'flex-1 overflow-y-auto custom-scrollbar hidden' });
+            const main = document.querySelector('main');
+            const messages = document.getElementById('messages');
+            if (main && messages) main.insertBefore(container, messages);
+        }
+        container.classList.remove('hidden');
+
+        switch (view) {
+            case 'tasks': renderTaskDashboard(container); break;
+            case 'worktrees': renderWorktreeDashboard(container); break;
+            case 'memory': renderMemoryDashboard(container); break;
+        }
+    }
+
+    // --- Task Dashboard (WO-16) ---
+
+    async function refreshDashboardTasks() {
+        try {
+            const tasks = await api('GET', '/api/dashboard/tasks') || [];
+            const hash = JSON.stringify(tasks.map(t => [t.id, t.status, t.last_activity_at]));
+            if (hash === store._dashboardTaskHash) return;
+            store._dashboardTaskHash = hash;
+            store.dashboardTasks = tasks;
+            renderTaskSwimlanes();
+            if (store.currentNav === 'tasks') {
+                const container = document.getElementById('dashboard-main');
+                if (container) renderTaskDashboard(container);
+            }
+        } catch (e) { console.error('refreshDashboardTasks:', e); }
+    }
+
+    function renderTaskSwimlanes() {
+        const container = document.getElementById('task-swimlanes');
+        if (!container) return;
+
+        const tasks = filterTasks(store.dashboardTasks);
+
+        // Group by repo
+        const byRepo = new Map();
+        for (const t of tasks) {
+            const key = `${t.org}/${t.repo}`;
+            if (!byRepo.has(key)) byRepo.set(key, []);
+            byRepo.get(key).push(t);
+        }
+
+        // Populate repo filter
+        const repoFilter = document.getElementById('task-filter-repo');
+        if (repoFilter && repoFilter.options.length <= 1) {
+            const repos = new Set(store.dashboardTasks.map(t => `${t.org}/${t.repo}`));
+            for (const r of repos) {
+                repoFilter.appendChild(h('option', { value: r, textContent: r }));
+            }
+        }
+
+        container.textContent = '';
+        if (byRepo.size === 0) {
+            container.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 py-2', textContent: 'No tasks found' }));
+            return;
+        }
+
+        for (const [repo, repoTasks] of byRepo) {
+            const section = h('div', { className: 'mb-3' });
+            section.appendChild(h('div', {
+                className: 'flex items-center gap-1 px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider',
+                textContent: repo,
+            }));
+
+            for (const t of repoTasks) {
+                const statusColor = taskStatusColor(t.status);
+                const el = h('div', {
+                    className: `flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800`,
+                    'data-action': 'select-task', 'data-id': t.id,
+                    title: t.title,
+                });
+                el.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor} flex-shrink-0` }));
+                el.appendChild(h('span', { className: 'text-xs truncate flex-1 text-gray-700 dark:text-gray-200', textContent: `#${t.issue_number} ${t.title}` }));
+                if (t.last_activity_at) {
+                    el.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', textContent: formatRelativeTime(t.last_activity_at) }));
+                }
+                section.appendChild(el);
+            }
+            container.appendChild(section);
+        }
+    }
+
+    function filterTasks(tasks) {
+        const statusFilter = document.getElementById('task-filter-status')?.value || '';
+        const repoFilter = document.getElementById('task-filter-repo')?.value || '';
+        return tasks.filter(t => {
+            if (statusFilter && t.status !== statusFilter) return false;
+            if (repoFilter && `${t.org}/${t.repo}` !== repoFilter) return false;
+            return true;
+        });
+    }
+
+    function taskStatusColor(status) {
+        return {
+            active: 'bg-blue-500',
+            pending: 'bg-yellow-500',
+            completed: 'bg-green-500',
+            failed: 'bg-red-500',
+            stuck: 'bg-orange-500',
+        }[status] || 'bg-gray-500';
+    }
+
+    function renderTaskDashboard(container) {
+        container.textContent = '';
+        const inner = h('div', { className: 'max-w-6xl mx-auto p-6 space-y-6' });
+
+        // Header
+        inner.appendChild(h('h2', { className: 'text-xl font-bold text-gray-900 dark:text-white', textContent: 'Task Dashboard' }));
+
+        // Status summary cards
+        const tasks = store.dashboardTasks;
+        const counts = { active: 0, pending: 0, completed: 0, failed: 0 };
+        for (const t of tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+
+        const cards = h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' });
+        for (const [status, count] of Object.entries(counts)) {
+            const color = { active: 'blue', pending: 'yellow', completed: 'green', failed: 'red' }[status] || 'gray';
+            cards.appendChild(h('div', {
+                className: `bg-${color}-50 dark:bg-${color}-900/20 border border-${color}-200 dark:border-${color}-800 rounded-lg p-4`,
+            },
+                h('div', { className: `text-2xl font-bold text-${color}-600 dark:text-${color}-400`, textContent: String(count) }),
+                h('div', { className: 'text-xs text-gray-600 dark:text-gray-400 uppercase', textContent: status }),
+            ));
+        }
+        inner.appendChild(cards);
+
+        // Swimlanes by repo
+        const byRepo = new Map();
+        for (const t of tasks) {
+            const key = `${t.org}/${t.repo}`;
+            if (!byRepo.has(key)) byRepo.set(key, []);
+            byRepo.get(key).push(t);
+        }
+
+        for (const [repo, repoTasks] of byRepo) {
+            const section = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden' });
+            section.appendChild(h('div', {
+                className: 'px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm text-gray-700 dark:text-gray-200',
+                textContent: repo,
+            }));
+
+            const lanes = h('div', { className: 'flex gap-0 overflow-x-auto' });
+            const statusGroups = { active: [], pending: [], completed: [], failed: [] };
+            for (const t of repoTasks) {
+                if (statusGroups[t.status]) statusGroups[t.status].push(t);
+                else {
+                    if (!statusGroups.other) statusGroups.other = [];
+                    statusGroups.other.push(t);
+                }
+            }
+
+            for (const [status, group] of Object.entries(statusGroups)) {
+                if (group.length === 0 && status !== 'active') continue;
+                const lane = h('div', { className: 'flex-1 min-w-[200px] border-r border-gray-200 dark:border-gray-700 last:border-r-0' });
+                const color = taskStatusColor(status);
+                lane.appendChild(h('div', {
+                    className: 'px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-2',
+                },
+                    h('span', { className: `w-2 h-2 rounded-full ${color}` }),
+                    h('span', { textContent: `${status} (${group.length})` }),
+                ));
+
+                const taskList = h('div', { className: 'px-2 pb-2 space-y-1' });
+                for (const t of group) {
+                    const card = h('div', {
+                        className: 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-2 cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 transition-colors',
+                    });
+                    card.appendChild(h('div', { className: 'text-xs font-medium text-gray-700 dark:text-gray-200 truncate', textContent: `#${t.issue_number} ${t.title}` }));
+                    const meta = h('div', { className: 'flex items-center gap-2 mt-1 text-xs text-gray-400 dark:text-gray-500' });
+                    if (t.branch_name) meta.appendChild(h('span', { textContent: t.branch_name, className: 'truncate' }));
+                    if (t.last_activity_at) meta.appendChild(h('span', { textContent: formatRelativeTime(t.last_activity_at) }));
+                    card.appendChild(meta);
+                    if (t.issue_url) {
+                        card.onclick = () => window.open(t.issue_url, '_blank');
+                    }
+                    taskList.appendChild(card);
+                }
+                lane.appendChild(taskList);
+                lanes.appendChild(lane);
+            }
+
+            section.appendChild(lanes);
+            inner.appendChild(section);
+        }
+
+        if (tasks.length === 0) {
+            inner.appendChild(h('div', { className: 'text-center text-gray-500 dark:text-gray-600 py-20', textContent: 'No tasks found. Start an agent to see tasks here.' }));
+        }
+
+        container.appendChild(inner);
+    }
+
+    // --- Worktree Health Dashboard (WO-21) ---
+
+    async function refreshDashboardWorktrees() {
+        try {
+            const worktrees = await api('GET', '/api/dashboard/worktrees') || [];
+            const hash = JSON.stringify(worktrees.map(w => [w.id, w.status, w.last_activity_at]));
+            if (hash === store._dashboardWorktreeHash) return;
+            store._dashboardWorktreeHash = hash;
+            store.dashboardWorktrees = worktrees;
+            renderWorktreeList();
+            if (store.currentNav === 'worktrees') {
+                const container = document.getElementById('dashboard-main');
+                if (container) renderWorktreeDashboard(container);
+            }
+        } catch (e) { console.error('refreshDashboardWorktrees:', e); }
+    }
+
+    function renderWorktreeList() {
+        const container = document.getElementById('worktree-list');
+        if (!container) return;
+
+        container.textContent = '';
+        const worktrees = store.dashboardWorktrees;
+        if (!worktrees.length) {
+            container.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 py-2', textContent: 'No worktrees found' }));
+            return;
+        }
+
+        for (const wt of worktrees) {
+            const statusColor = worktreeStatusColor(wt);
+            const el = h('div', { className: 'flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800' });
+            el.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor} flex-shrink-0` }));
+            el.appendChild(h('span', { className: 'text-xs truncate flex-1 text-gray-700 dark:text-gray-200', textContent: wt.branch_name }));
+            if (wt.has_uncommitted_changes) {
+                el.appendChild(h('span', { className: 'text-xs text-yellow-500', textContent: '●', title: 'Uncommitted changes' }));
+            }
+            if (wt.last_activity_at) {
+                el.appendChild(h('span', { className: 'text-xs text-gray-400 dark:text-gray-500 flex-shrink-0', textContent: formatRelativeTime(wt.last_activity_at) }));
+            }
+            container.appendChild(el);
+        }
+    }
+
+    function worktreeStatusColor(wt) {
+        if (wt.status === 'completed') return 'bg-green-500';
+        if (wt.status === 'failed' || wt.status === 'corrupted') return 'bg-red-500';
+
+        // Check if abandoned (no activity for 24h)
+        if (wt.last_activity_at) {
+            const lastMs = normalizeTs(wt.last_activity_at);
+            if (lastMs && (Date.now() - lastMs) > 24 * 60 * 60 * 1000) return 'bg-orange-500';
+        }
+
+        if (wt.has_uncommitted_changes) return 'bg-yellow-500';
+        return 'bg-blue-500';
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+    }
+
+    function renderWorktreeDashboard(container) {
+        container.textContent = '';
+        const inner = h('div', { className: 'max-w-6xl mx-auto p-6 space-y-6' });
+
+        inner.appendChild(h('h2', { className: 'text-xl font-bold text-gray-900 dark:text-white', textContent: 'Worktree Health' }));
+
+        const worktrees = store.dashboardWorktrees;
+        const active = worktrees.filter(w => w.status === 'active');
+        const abandoned = active.filter(w => {
+            const lastMs = normalizeTs(w.last_activity_at);
+            return lastMs && (Date.now() - lastMs) > 24 * 60 * 60 * 1000;
+        });
+        const withChanges = active.filter(w => w.has_uncommitted_changes);
+        const totalDisk = worktrees.reduce((sum, w) => sum + (w.disk_usage_bytes || 0), 0);
+
+        // Summary cards
+        const cards = h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' });
+        cards.appendChild(makeStatCard('Active', String(active.length), 'blue'));
+        cards.appendChild(makeStatCard('Abandoned', String(abandoned.length), abandoned.length > 0 ? 'orange' : 'green'));
+        cards.appendChild(makeStatCard('Uncommitted', String(withChanges.length), withChanges.length > 0 ? 'yellow' : 'green'));
+        cards.appendChild(makeStatCard('Disk Usage', formatBytes(totalDisk), totalDisk > 1e9 ? 'red' : 'blue'));
+        inner.appendChild(cards);
+
+        // Worktree table
+        if (worktrees.length > 0) {
+            const table = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden' });
+            const header = h('div', { className: 'grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase' });
+            header.appendChild(h('div', { className: 'col-span-1', textContent: 'Status' }));
+            header.appendChild(h('div', { className: 'col-span-4', textContent: 'Branch' }));
+            header.appendChild(h('div', { className: 'col-span-2', textContent: 'Disk' }));
+            header.appendChild(h('div', { className: 'col-span-2', textContent: 'Changes' }));
+            header.appendChild(h('div', { className: 'col-span-3', textContent: 'Last Activity' }));
+            table.appendChild(header);
+
+            for (const wt of worktrees) {
+                const row = h('div', { className: 'grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-700 last:border-b-0 text-sm' });
+                const color = worktreeStatusColor(wt);
+                row.appendChild(h('div', { className: 'col-span-1 flex items-center' }, h('span', { className: `w-2 h-2 rounded-full ${color}` })));
+                row.appendChild(h('div', { className: 'col-span-4 text-gray-700 dark:text-gray-200 truncate', textContent: wt.branch_name, title: wt.worktree_path }));
+                row.appendChild(h('div', { className: 'col-span-2 text-gray-500 dark:text-gray-400', textContent: wt.disk_usage_bytes ? formatBytes(wt.disk_usage_bytes) : '-' }));
+                row.appendChild(h('div', { className: 'col-span-2', },
+                    wt.has_uncommitted_changes ?
+                        h('span', { className: 'text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded', textContent: 'Yes' }) :
+                        h('span', { className: 'text-xs text-gray-400', textContent: 'Clean' }),
+                ));
+                row.appendChild(h('div', { className: 'col-span-3 text-gray-500 dark:text-gray-400', textContent: wt.last_activity_at ? formatRelativeTime(wt.last_activity_at) : '-' }));
+                table.appendChild(row);
+            }
+            inner.appendChild(table);
+        } else {
+            inner.appendChild(h('div', { className: 'text-center text-gray-500 dark:text-gray-600 py-20', textContent: 'No worktrees found.' }));
+        }
+
+        container.appendChild(inner);
+    }
+
+    function makeStatCard(label, value, color) {
+        const card = h('div', { className: `bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4` });
+        card.appendChild(h('div', { className: `text-2xl font-bold text-${color}-600 dark:text-${color}-400`, textContent: value }));
+        card.appendChild(h('div', { className: 'text-xs text-gray-600 dark:text-gray-400 uppercase', textContent: label }));
+        return card;
+    }
+
+    // --- Memory Analytics Dashboard (WO-22) ---
+
+    async function refreshDashboardMemory() {
+        try {
+            const stats = await api('GET', '/api/dashboard/memory-stats') || [];
+            store.dashboardMemoryStats = stats;
+            renderMemoryStatsSidebar();
+            if (store.currentNav === 'memory') {
+                const container = document.getElementById('dashboard-main');
+                if (container) renderMemoryDashboard(container);
+            }
+        } catch (e) { console.error('refreshDashboardMemory:', e); }
+    }
+
+    function renderMemoryStatsSidebar() {
+        const container = document.getElementById('memory-stats');
+        if (!container) return;
+
+        container.textContent = '';
+        const stats = store.dashboardMemoryStats;
+        if (!stats.length) {
+            container.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 py-2', textContent: 'No memory data found' }));
+            return;
+        }
+
+        for (const repo of stats) {
+            const section = h('div', { className: 'mb-3' });
+            section.appendChild(h('div', {
+                className: 'text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-2 py-1',
+                textContent: `${repo.org}/${repo.repo}`,
+            }));
+            section.appendChild(h('div', {
+                className: 'text-xs text-gray-600 dark:text-gray-300 px-2',
+                textContent: `${repo.file_count} files`,
+            }));
+
+            if (repo.by_category) {
+                for (const [cat, count] of Object.entries(repo.by_category)) {
+                    const row = h('div', { className: 'flex items-center justify-between px-2 py-0.5 text-xs' });
+                    row.appendChild(h('span', { className: 'text-gray-500 dark:text-gray-400', textContent: cat }));
+                    row.appendChild(h('span', { className: 'text-gray-700 dark:text-gray-200 font-medium', textContent: String(count) }));
+                    section.appendChild(row);
+                }
+            }
+            container.appendChild(section);
+        }
+    }
+
+    function renderMemoryDashboard(container) {
+        container.textContent = '';
+        const inner = h('div', { className: 'max-w-6xl mx-auto p-6 space-y-6' });
+
+        inner.appendChild(h('h2', { className: 'text-xl font-bold text-gray-900 dark:text-white', textContent: 'Memory Analytics' }));
+
+        const stats = store.dashboardMemoryStats;
+        const totalFiles = stats.reduce((s, r) => s + r.file_count, 0);
+        const totalSize = stats.reduce((s, r) => s + r.total_size_bytes, 0);
+
+        // Aggregate category counts
+        const allCategories = {};
+        for (const repo of stats) {
+            if (repo.by_category) {
+                for (const [cat, count] of Object.entries(repo.by_category)) {
+                    allCategories[cat] = (allCategories[cat] || 0) + count;
+                }
+            }
+        }
+
+        // Summary
+        const cards = h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' });
+        cards.appendChild(makeStatCard('Repositories', String(stats.length), 'blue'));
+        cards.appendChild(makeStatCard('Total Files', String(totalFiles), 'green'));
+        cards.appendChild(makeStatCard('Total Size', formatBytes(totalSize), 'purple'));
+        cards.appendChild(makeStatCard('Categories', String(Object.keys(allCategories).length), 'yellow'));
+        inner.appendChild(cards);
+
+        // Category breakdown
+        if (Object.keys(allCategories).length > 0) {
+            const catSection = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4' });
+            catSection.appendChild(h('h3', { className: 'text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3', textContent: 'Files by Category' }));
+
+            const sortedCats = Object.entries(allCategories).sort((a, b) => b[1] - a[1]);
+            for (const [cat, count] of sortedCats) {
+                const pct = totalFiles > 0 ? (count / totalFiles) * 100 : 0;
+                const row = h('div', { className: 'flex items-center gap-3 py-1' });
+                row.appendChild(h('span', { className: 'text-sm text-gray-600 dark:text-gray-300 w-32 truncate', textContent: cat }));
+                const bar = h('div', { className: 'flex-1 h-4 bg-gray-200 dark:bg-gray-700 rounded overflow-hidden' });
+                bar.appendChild(h('div', { className: 'h-full bg-blue-500 rounded', style: `width:${pct}%` }));
+                row.appendChild(bar);
+                row.appendChild(h('span', { className: 'text-xs text-gray-500 dark:text-gray-400 w-16 text-right', textContent: `${count} (${Math.round(pct)}%)` }));
+                catSection.appendChild(row);
+            }
+            inner.appendChild(catSection);
+        }
+
+        // Per-repo breakdown
+        for (const repo of stats) {
+            const section = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4' });
+            section.appendChild(h('h3', { className: 'text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2', textContent: `${repo.org}/${repo.repo}` }));
+            section.appendChild(h('div', { className: 'text-xs text-gray-500 dark:text-gray-400', textContent: `${repo.file_count} files · ${formatBytes(repo.total_size_bytes)}` }));
+
+            if (repo.by_category && Object.keys(repo.by_category).length > 0) {
+                const grid = h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-2 mt-3' });
+                for (const [cat, count] of Object.entries(repo.by_category).sort((a, b) => b[1] - a[1])) {
+                    grid.appendChild(h('div', { className: 'bg-gray-50 dark:bg-gray-900 rounded p-2 text-xs' },
+                        h('div', { className: 'font-medium text-gray-700 dark:text-gray-200', textContent: String(count) }),
+                        h('div', { className: 'text-gray-500 dark:text-gray-400 truncate', textContent: cat }),
+                    ));
+                }
+                section.appendChild(grid);
+            }
+            inner.appendChild(section);
+        }
+
+        if (!stats.length) {
+            inner.appendChild(h('div', { className: 'text-center text-gray-500 dark:text-gray-600 py-20', textContent: 'No memory data found.' }));
+        }
+
+        container.appendChild(inner);
+    }
+
+    // --- Search (WO-18) ---
+
+    let searchTimeout = null;
+
+    function openSearch() {
+        const modal = document.getElementById('modal-search');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        const input = document.getElementById('search-input');
+        if (input) { input.value = ''; input.focus(); }
+
+        // Populate repo filter
+        const repoFilter = document.getElementById('search-filter-repo');
+        if (repoFilter && repoFilter.options.length <= 1) {
+            for (const inst of store.instances.values()) {
+                if (inst.org && inst.repo) {
+                    repoFilter.appendChild(h('option', { value: inst.id, textContent: `${inst.org}/${inst.repo}` }));
+                }
+            }
+        }
+    }
+
+    function closeSearch() {
+        const modal = document.getElementById('modal-search');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    async function performSearch(query) {
+        const results = document.getElementById('search-results');
+        if (!results) return;
+
+        if (!query.trim()) {
+            results.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 text-center py-8">Type to search...</p>';
+            return;
+        }
+
+        results.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 text-center py-4">Searching...</p>';
+
+        try {
+            const instanceId = document.getElementById('search-filter-repo')?.value || '';
+            const params = new URLSearchParams({ q: query });
+            if (instanceId) params.set('instance_id', instanceId);
+
+            const data = await api('GET', `/api/memory/query?${params}`);
+            const items = data?.results || [];
+
+            results.textContent = '';
+            if (items.length === 0) {
+                results.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500 text-center py-8">No results found</p>';
+                return;
+            }
+
+            for (const item of items) {
+                const el = h('div', {
+                    className: 'px-3 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer',
+                });
+                el.appendChild(h('div', { className: 'text-sm font-medium text-gray-700 dark:text-gray-200 truncate', textContent: item.title || item.path }));
+                if (item.category) {
+                    el.appendChild(h('span', { className: 'text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded', textContent: item.category }));
+                }
+                if (item.snippet) {
+                    el.appendChild(h('p', { className: 'text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2', textContent: item.snippet }));
+                }
+                results.appendChild(el);
+            }
+        } catch (e) {
+            results.innerHTML = '<p class="text-xs text-red-400 text-center py-4">Search failed</p>';
+        }
+    }
+
+    // --- Keyboard Navigation (WO-19) ---
+
+    function initKeyboardNav() {
+        document.addEventListener('keydown', (e) => {
+            // Don't handle shortcuts when typing in inputs
+            const tag = e.target.tagName;
+            const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+            // Cmd/Ctrl+K: Search
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                openSearch();
+                return;
+            }
+
+            // Cmd/Ctrl+/: Shortcuts overlay
+            if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+                e.preventDefault();
+                const modal = document.getElementById('modal-shortcuts');
+                if (modal) modal.classList.toggle('hidden');
+                return;
+            }
+
+            // Escape: Close modals
+            if (e.key === 'Escape') {
+                closeSearch();
+                document.getElementById('modal-shortcuts')?.classList.add('hidden');
+                document.getElementById('modal-new-instance')?.classList.add('hidden');
+                // Close mobile sidebar
+                closeMobileSidebar();
+                return;
+            }
+
+            if (isInput) return;
+
+            // J/K: Navigate items
+            if (e.key === 'j' || e.key === 'k') {
+                navigateItems(e.key === 'j' ? 1 : -1);
+                return;
+            }
+
+            // 1-4: Switch nav tabs
+            if (e.key === '1') { switchNav('conversations'); return; }
+            if (e.key === '2') { switchNav('tasks'); return; }
+            if (e.key === '3') { switchNav('worktrees'); return; }
+            if (e.key === '4') { switchNav('memory'); return; }
+        });
+    }
+
+    function navigateItems(direction) {
+        // Navigate sessions in conversations view
+        if (store.currentNav === 'conversations') {
+            const sessionIds = Array.from(store.sessions.keys());
+            if (!sessionIds.length) return;
+            const currentIdx = sessionIds.indexOf(store.selectedSessionId);
+            const newIdx = Math.max(0, Math.min(sessionIds.length - 1, currentIdx + direction));
+            if (sessionIds[newIdx] !== store.selectedSessionId) {
+                selectSession(sessionIds[newIdx]);
+            }
+        }
+    }
+
+    // --- Mobile Responsive (WO-17) ---
+
+    function toggleMobileSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (!sidebar || !overlay) return;
+
+        const isOpen = !sidebar.classList.contains('max-md:-translate-x-full');
+        if (isOpen) {
+            closeMobileSidebar();
+        } else {
+            sidebar.classList.remove('max-md:-translate-x-full');
+            overlay.classList.remove('hidden');
+        }
+    }
+
+    function closeMobileSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (sidebar) sidebar.classList.add('max-md:-translate-x-full');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    // Make toggleMobileSidebar available globally for onclick handlers
+    window.toggleMobileSidebar = toggleMobileSidebar;
+
+    // Close sidebar on mobile when selecting an item
+    const origSelectSession = typeof selectSession === 'function' ? selectSession : null;
+    const origSelectInstance = typeof selectInstance === 'function' ? selectInstance : null;
+
+    // --- Nav tab event listeners ---
+    document.querySelectorAll('[data-nav]').forEach(btn => {
+        btn.addEventListener('click', () => switchNav(btn.dataset.nav));
+    });
+
+    // Task filter listeners
+    document.getElementById('task-filter-status')?.addEventListener('change', renderTaskSwimlanes);
+    document.getElementById('task-filter-repo')?.addEventListener('change', renderTaskSwimlanes);
+
+    // Search input listener
+    document.getElementById('search-input')?.addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => performSearch(e.target.value), 300);
+    });
+    document.getElementById('search-filter-repo')?.addEventListener('change', () => {
+        const input = document.getElementById('search-input');
+        if (input && input.value) performSearch(input.value);
+    });
+    document.getElementById('modal-search')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeSearch();
+    });
+
+    // =========================================================================
     // Section 11 — Markdown
     // =========================================================================
 
@@ -1681,12 +2357,40 @@
     initTheme();
     initMarkdown();
     initResize();
+    initKeyboardNav();
     refreshInstances();
     refreshFlockAgent();
     restoreFromURL();
     setInterval(refreshInstances, 5000);
     setInterval(refreshSessions, 5000);
     setInterval(refreshFlockAgent, 5000);
+    // Refresh dashboard data periodically
+    setInterval(() => {
+        if (store.currentNav === 'tasks') refreshDashboardTasks();
+        if (store.currentNav === 'worktrees') refreshDashboardWorktrees();
+        if (store.currentNav === 'memory') refreshDashboardMemory();
+    }, 10000);
 
     document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
+
+    // Touch swipe support for mobile navigation
+    let touchStartX = 0;
+    let touchStartY = 0;
+    document.addEventListener('touchstart', (e) => {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 2) {
+            if (dx > 0 && touchStartX < 30) {
+                // Swipe right from edge: open sidebar
+                toggleMobileSidebar();
+            } else if (dx < 0) {
+                // Swipe left: close sidebar
+                closeMobileSidebar();
+            }
+        }
+    }, { passive: true });
 })();

@@ -107,3 +107,44 @@
 .dark .custom-scrollbar {
     scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
 }
+
+/* Focus indicators for keyboard navigation (WO-19) */
+*:focus-visible {
+    outline: 2px solid rgb(59, 130, 246);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+button:focus-visible,
+[data-action]:focus-visible,
+a:focus-visible {
+    outline: 2px solid rgb(59, 130, 246);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Skeleton loading animation (WO-20) */
+@keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.skeleton {
+    animation: skeleton-pulse 2s ease-in-out infinite;
+    @apply bg-gray-200 dark:bg-gray-700 rounded;
+}
+
+/* Mobile touch targets (WO-17) */
+@media (max-width: 767px) {
+    button, [data-action], a {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
