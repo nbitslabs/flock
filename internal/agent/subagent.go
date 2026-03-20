@@ -85,12 +85,29 @@ func composeSubAgentPrompt(dataDir, org, repo, worktreePath string, task *sqlc.T
 
 	return fmt.Sprintf(`You are an autonomous coding agent resolving a GitHub issue. Work independently to completion.
 
-## Environment
+---
+## ⚠ WORKTREE CONTEXT — READ BEFORE DOING ANYTHING ⚠
 
-You are already inside the git worktree for this task. Your working directory is:
-`+"`%s`"+`
+| Field | Value |
+|-------|-------|
+| **Working Directory** | `+"`%s`"+` |
+| **Branch** | `+"`%s`"+` |
+| **Issue** | #%d — %s |
 
-**Do not create or switch worktrees.** All your work happens in the current directory.
+### Worktree Restrictions
+- You are inside a flock-managed git worktree. **Do NOT leave this directory.**
+- **NEVER** run `+"`git checkout`"+`, `+"`git switch`"+`, or any `+"`git worktree`"+` command.
+- **NEVER** remove, move, or modify this worktree — flock manages its lifecycle.
+- All git commands (add, commit, push, status, diff, log) are allowed.
+
+### Git Filter Setup
+A git wrapper is installed that enforces these restrictions. Before running git commands, set your PATH:
+`+"`"+`
+export PATH="%s/.flock/bin:$PATH"
+`+"`"+`
+Run this export at the start of your session. All subsequent git commands will be filtered.
+
+---
 
 ## Issue
 - **Number**: #%d
@@ -102,24 +119,26 @@ You are already inside the git worktree for this task. Your working directory is
 - Progress file: `+"`%s/issue_%d.md`"+`
 
 ## Workflow
-1. Read the issue details: `+"`gh issue view %d`"+`
-2. Understand the codebase and the issue
-3. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and the repo state path. It will write a plan to `+"`%s/issue_%d.md`"+`.
-4. Read the plan from `+"`%s/issue_%d.md`"+` to understand the proposed solution
-5. Implement the fix/feature based on the plan
-6. Run tests to verify
-7. Stage your changes with `+"`git add`"+`
-8. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. Make sure the commit message body includes `+"`Fixes #%d`"+`.
-9. Commit with the generated message
-10. Push the branch: `+"`git push -u origin %s`"+`
-11. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, and the issue URL (%s).
+1. Set up git filter: `+"`export PATH=\"%s/.flock/bin:$PATH\"`"+`
+2. Read the issue details: `+"`gh issue view %d`"+`
+3. Understand the codebase and the issue
+4. Generate an implementation plan by invoking the `+"`@flock-issue-triage`"+` subagent. Send it the issue number, URL, title, and the repo state path. It will write a plan to `+"`%s/issue_%d.md`"+`.
+5. Read the plan from `+"`%s/issue_%d.md`"+` to understand the proposed solution
+6. Implement the fix/feature based on the plan
+7. Run tests to verify
+8. Stage your changes with `+"`git add`"+`
+9. Generate a commit message by invoking the `+"`@flock-commit-writer`"+` subagent. Send it a message with the task context (issue #%d: %s), the output of `+"`git diff --cached`"+`, and the list of staged files. Make sure the commit message body includes `+"`Fixes #%d`"+`.
+10. Commit with the generated message
+11. Push the branch: `+"`git push -u origin %s`"+`
+12. Create or update a PR by invoking the `+"`@flock-pr`"+` subagent. Send it the task context (issue #%d: %s), the output of `+"`git log --oneline -10`"+`, and the issue URL (%s).
 
-## Environment
+## Development Environment
 This project uses Nix for development tooling. To run commands with the devenv (compilers, linters, CLI utilities, etc.), wrap them with `+"`nix develop --impure -c bash -c \"<command>\"`"+`. For example: `+"`nix develop --impure -c bash -c \"go test ./...\"`"+`
 
 ## Rules
 - Work autonomously — do not ask for human input
-- You are already in the worktree — do NOT run git worktree commands
+- Stay in your worktree directory: `+"`%s`"+`
+- Your branch is `+"`%s`"+` — do NOT change it
 - Write clean, tested code
 - If tests fail, fix them before proceeding
 - Write progress to `+"`%s/issue_%d.md`"+`
@@ -127,11 +146,15 @@ This project uses Nix for development tooling. To run commands with the devenv (
 - When done, do NOT remove the worktree — flock manages cleanup
 `,
 		worktreePath,
+		task.BranchName,
+		task.IssueNumber, task.Title,
+		worktreePath,
 		task.IssueNumber,
 		task.Title,
 		task.IssueUrl,
 		repoStatePath,
 		progressPath, task.IssueNumber,
+		worktreePath,
 		task.IssueNumber,
 		progressPath, task.IssueNumber,
 		progressPath, task.IssueNumber,
@@ -139,8 +162,19 @@ This project uses Nix for development tooling. To run commands with the devenv (
 		task.IssueNumber,
 		task.BranchName,
 		task.IssueNumber, task.Title, task.IssueUrl,
+		worktreePath,
+		task.BranchName,
 		progressPath, task.IssueNumber,
 	)
+}
+
+// composeWorktreeContextHeader returns the worktree context section that should
+// be included at the top of every sub-agent message to reinforce boundaries.
+func composeWorktreeContextHeader(worktreePath, branchName string) string {
+	return fmt.Sprintf(`---
+**WORKTREE REMINDER**: You are in `+"`%s`"+` on branch `+"`%s`"+`. Do NOT switch branches, leave this directory, or manage worktrees.
+---
+`, worktreePath, branchName)
 }
 
 // RestartSubAgent creates a fresh session for a stuck task.
@@ -195,10 +229,12 @@ func RestartSubAgent(
 
 	prompt := composeSubAgentPrompt(dataDir, org, repo, wtPath, task)
 	prompt += fmt.Sprintf("\n## Previous Attempt\nThe previous session was stuck. Reason: %s\n", reason)
-	prompt += "\n## Note\nThe worktree and branch already exist from the previous attempt. Continue from where the previous agent left off.\n"
+	prompt += fmt.Sprintf("\n## Note\nThe worktree (%s) and branch (%s) already exist from the previous attempt. Continue from where the previous agent left off.\n",
+		wtPath, task.BranchName)
 	if progressContent != "" {
 		prompt += fmt.Sprintf("\n## Context from Memory\n%s\n", progressContent)
 	}
+	prompt += "\n" + composeWorktreeContextHeader(wtPath, task.BranchName)
 
 	log.Printf("agent: restarted sub-agent session %s for issue #%d (reason: %s)",
 		session.ID[:8], task.IssueNumber, reason)
