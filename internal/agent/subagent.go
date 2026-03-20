@@ -63,6 +63,9 @@ func CreateSubAgentSession(
 
 	log.Printf("agent: created sub-agent session %s for issue #%d in worktree %s", session.ID[:8], task.IssueNumber, wtPath)
 
+	// Record worktree metadata
+	RecordWorktreeCreation(ctx, queries, instanceID, dataDir, org, repo, task.BranchName, session.ID, task.IssueNumber)
+
 	prompt := composeSubAgentPrompt(dataDir, org, repo, wtPath, task)
 
 	// Send message in a goroutine so it doesn't block the heartbeat loop.

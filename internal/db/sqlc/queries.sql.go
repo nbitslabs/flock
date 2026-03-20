@@ -85,6 +85,46 @@ func (q *Queries) CreateFlockAgentSession(ctx context.Context, arg CreateFlockAg
 	return i, err
 }
 
+const createHealthCheck = `-- name: CreateHealthCheck :one
+INSERT INTO worktree_health_checks (id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message, checked_at
+`
+
+type CreateHealthCheckParams struct {
+	ID                    string
+	WorktreeID            string
+	Status                string
+	GitFsckOk             int64
+	HasUncommittedChanges int64
+	DiskUsageBytes        int64
+	ErrorMessage          string
+}
+
+func (q *Queries) CreateHealthCheck(ctx context.Context, arg CreateHealthCheckParams) (WorktreeHealthCheck, error) {
+	row := q.db.QueryRowContext(ctx, createHealthCheck,
+		arg.ID,
+		arg.WorktreeID,
+		arg.Status,
+		arg.GitFsckOk,
+		arg.HasUncommittedChanges,
+		arg.DiskUsageBytes,
+		arg.ErrorMessage,
+	)
+	var i WorktreeHealthCheck
+	err := row.Scan(
+		&i.ID,
+		&i.WorktreeID,
+		&i.Status,
+		&i.GitFsckOk,
+		&i.HasUncommittedChanges,
+		&i.DiskUsageBytes,
+		&i.ErrorMessage,
+		&i.CheckedAt,
+	)
+	return i, err
+}
+
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (id, pid, port, working_directory, status, org, repo)
 VALUES (?, 0, 0, ?, 'running', ?, ?)
@@ -229,6 +269,52 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.LastActivityAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createWorktreeMetadata = `-- name: CreateWorktreeMetadata :one
+
+INSERT INTO worktree_metadata (id, instance_id, branch_name, worktree_path, issue_number, agent_session_id)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at
+`
+
+type CreateWorktreeMetadataParams struct {
+	ID             string
+	InstanceID     string
+	BranchName     string
+	WorktreePath   string
+	IssueNumber    int64
+	AgentSessionID string
+}
+
+// Worktree metadata queries
+func (q *Queries) CreateWorktreeMetadata(ctx context.Context, arg CreateWorktreeMetadataParams) (WorktreeMetadatum, error) {
+	row := q.db.QueryRowContext(ctx, createWorktreeMetadata,
+		arg.ID,
+		arg.InstanceID,
+		arg.BranchName,
+		arg.WorktreePath,
+		arg.IssueNumber,
+		arg.AgentSessionID,
+	)
+	var i WorktreeMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.BranchName,
+		&i.WorktreePath,
+		&i.IssueNumber,
+		&i.AgentSessionID,
+		&i.Status,
+		&i.DeletionReason,
+		&i.DiskUsageBytes,
+		&i.HasUncommittedChanges,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -447,6 +533,29 @@ func (q *Queries) GetLastHeartbeatByInstance(ctx context.Context, instanceID str
 	return last_heartbeat_at, err
 }
 
+const getLatestHealthCheck = `-- name: GetLatestHealthCheck :one
+SELECT id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message, checked_at FROM worktree_health_checks
+WHERE worktree_id = ?
+ORDER BY checked_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestHealthCheck(ctx context.Context, worktreeID string) (WorktreeHealthCheck, error) {
+	row := q.db.QueryRowContext(ctx, getLatestHealthCheck, worktreeID)
+	var i WorktreeHealthCheck
+	err := row.Scan(
+		&i.ID,
+		&i.WorktreeID,
+		&i.Status,
+		&i.GitFsckOk,
+		&i.HasUncommittedChanges,
+		&i.DiskUsageBytes,
+		&i.ErrorMessage,
+		&i.CheckedAt,
+	)
+	return i, err
+}
+
 const getSession = `-- name: GetSession :one
 SELECT id, instance_id, title, status, created_at, updated_at, parent_id, model FROM sessions WHERE id = ?
 `
@@ -520,6 +629,65 @@ func (q *Queries) GetTaskByIssue(ctx context.Context, arg GetTaskByIssueParams) 
 	return i, err
 }
 
+const getWorktreeByBranch = `-- name: GetWorktreeByBranch :one
+SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
+WHERE instance_id = ? AND branch_name = ? AND status = 'active'
+LIMIT 1
+`
+
+type GetWorktreeByBranchParams struct {
+	InstanceID string
+	BranchName string
+}
+
+func (q *Queries) GetWorktreeByBranch(ctx context.Context, arg GetWorktreeByBranchParams) (WorktreeMetadatum, error) {
+	row := q.db.QueryRowContext(ctx, getWorktreeByBranch, arg.InstanceID, arg.BranchName)
+	var i WorktreeMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.BranchName,
+		&i.WorktreePath,
+		&i.IssueNumber,
+		&i.AgentSessionID,
+		&i.Status,
+		&i.DeletionReason,
+		&i.DiskUsageBytes,
+		&i.HasUncommittedChanges,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getWorktreeByID = `-- name: GetWorktreeByID :one
+SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata WHERE id = ?
+`
+
+func (q *Queries) GetWorktreeByID(ctx context.Context, id string) (WorktreeMetadatum, error) {
+	row := q.db.QueryRowContext(ctx, getWorktreeByID, id)
+	var i WorktreeMetadatum
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.BranchName,
+		&i.WorktreePath,
+		&i.IssueNumber,
+		&i.AgentSessionID,
+		&i.Status,
+		&i.DeletionReason,
+		&i.DiskUsageBytes,
+		&i.HasUncommittedChanges,
+		&i.LastActivityAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const incrementHeartbeatCount = `-- name: IncrementHeartbeatCount :exec
 UPDATE orchestrator_sessions
 SET heartbeat_count = heartbeat_count + 1, last_heartbeat_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
@@ -529,6 +697,51 @@ WHERE id = ?
 func (q *Queries) IncrementHeartbeatCount(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, incrementHeartbeatCount, id)
 	return err
+}
+
+const listAbandonedWorktrees = `-- name: ListAbandonedWorktrees :many
+SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
+WHERE instance_id = ? AND status = 'active'
+AND last_activity_at < datetime('now', 'utc', '-24 hours')
+ORDER BY last_activity_at ASC
+`
+
+func (q *Queries) ListAbandonedWorktrees(ctx context.Context, instanceID string) ([]WorktreeMetadatum, error) {
+	rows, err := q.db.QueryContext(ctx, listAbandonedWorktrees, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorktreeMetadatum
+	for rows.Next() {
+		var i WorktreeMetadatum
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.BranchName,
+			&i.WorktreePath,
+			&i.IssueNumber,
+			&i.AgentSessionID,
+			&i.Status,
+			&i.DeletionReason,
+			&i.DiskUsageBytes,
+			&i.HasUncommittedChanges,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listActiveTasks = `-- name: ListActiveTasks :many
@@ -557,6 +770,94 @@ func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Tas
 			&i.LastActivityAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveWorktrees = `-- name: ListActiveWorktrees :many
+SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
+WHERE instance_id = ? AND status = 'active'
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListActiveWorktrees(ctx context.Context, instanceID string) ([]WorktreeMetadatum, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveWorktrees, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorktreeMetadatum
+	for rows.Next() {
+		var i WorktreeMetadatum
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.BranchName,
+			&i.WorktreePath,
+			&i.IssueNumber,
+			&i.AgentSessionID,
+			&i.Status,
+			&i.DeletionReason,
+			&i.DiskUsageBytes,
+			&i.HasUncommittedChanges,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllWorktrees = `-- name: ListAllWorktrees :many
+SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
+WHERE instance_id = ?
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAllWorktrees(ctx context.Context, instanceID string) ([]WorktreeMetadatum, error) {
+	rows, err := q.db.QueryContext(ctx, listAllWorktrees, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorktreeMetadatum
+	for rows.Next() {
+		var i WorktreeMetadatum
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.BranchName,
+			&i.WorktreePath,
+			&i.IssueNumber,
+			&i.AgentSessionID,
+			&i.Status,
+			&i.DeletionReason,
+			&i.DiskUsageBytes,
+			&i.HasUncommittedChanges,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -637,6 +938,45 @@ func (q *Queries) ListFailedTasks(ctx context.Context, instanceID string) ([]Tas
 			&i.LastActivityAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHealthChecksByWorktree = `-- name: ListHealthChecksByWorktree :many
+SELECT id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message, checked_at FROM worktree_health_checks
+WHERE worktree_id = ?
+ORDER BY checked_at DESC
+LIMIT 10
+`
+
+func (q *Queries) ListHealthChecksByWorktree(ctx context.Context, worktreeID string) ([]WorktreeHealthCheck, error) {
+	rows, err := q.db.QueryContext(ctx, listHealthChecksByWorktree, worktreeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorktreeHealthCheck
+	for rows.Next() {
+		var i WorktreeHealthCheck
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorktreeID,
+			&i.Status,
+			&i.GitFsckOk,
+			&i.HasUncommittedChanges,
+			&i.DiskUsageBytes,
+			&i.ErrorMessage,
+			&i.CheckedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -951,6 +1291,66 @@ type UpdateTaskStatusParams struct {
 
 func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateTaskStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateWorktreeActivity = `-- name: UpdateWorktreeActivity :exec
+UPDATE worktree_metadata
+SET last_activity_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
+WHERE id = ?
+`
+
+func (q *Queries) UpdateWorktreeActivity(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, updateWorktreeActivity, id)
+	return err
+}
+
+const updateWorktreeDeleted = `-- name: UpdateWorktreeDeleted :exec
+UPDATE worktree_metadata
+SET status = 'completed', deletion_reason = ?, deleted_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
+WHERE id = ?
+`
+
+type UpdateWorktreeDeletedParams struct {
+	DeletionReason string
+	ID             string
+}
+
+func (q *Queries) UpdateWorktreeDeleted(ctx context.Context, arg UpdateWorktreeDeletedParams) error {
+	_, err := q.db.ExecContext(ctx, updateWorktreeDeleted, arg.DeletionReason, arg.ID)
+	return err
+}
+
+const updateWorktreeDiskUsage = `-- name: UpdateWorktreeDiskUsage :exec
+UPDATE worktree_metadata
+SET disk_usage_bytes = ?, has_uncommitted_changes = ?, updated_at = datetime('now', 'utc')
+WHERE id = ?
+`
+
+type UpdateWorktreeDiskUsageParams struct {
+	DiskUsageBytes        int64
+	HasUncommittedChanges int64
+	ID                    string
+}
+
+func (q *Queries) UpdateWorktreeDiskUsage(ctx context.Context, arg UpdateWorktreeDiskUsageParams) error {
+	_, err := q.db.ExecContext(ctx, updateWorktreeDiskUsage, arg.DiskUsageBytes, arg.HasUncommittedChanges, arg.ID)
+	return err
+}
+
+const updateWorktreeStatus = `-- name: UpdateWorktreeStatus :exec
+UPDATE worktree_metadata
+SET status = ?, updated_at = datetime('now', 'utc')
+WHERE id = ?
+`
+
+type UpdateWorktreeStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) UpdateWorktreeStatus(ctx context.Context, arg UpdateWorktreeStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateWorktreeStatus, arg.Status, arg.ID)
 	return err
 }
 

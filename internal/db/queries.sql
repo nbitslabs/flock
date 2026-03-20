@@ -159,6 +159,74 @@ UPDATE flock_agent_sessions SET status = 'retired', updated_at = datetime('now')
 -- name: GetActiveFlockAgentSessionByInstance :one
 SELECT * FROM sessions WHERE instance_id = 'flock-agent' AND status = 'active' LIMIT 1;
 
+-- Worktree metadata queries
+
+-- name: CreateWorktreeMetadata :one
+INSERT INTO worktree_metadata (id, instance_id, branch_name, worktree_path, issue_number, agent_session_id)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: GetWorktreeByBranch :one
+SELECT * FROM worktree_metadata
+WHERE instance_id = ? AND branch_name = ? AND status = 'active'
+LIMIT 1;
+
+-- name: GetWorktreeByID :one
+SELECT * FROM worktree_metadata WHERE id = ?;
+
+-- name: ListActiveWorktrees :many
+SELECT * FROM worktree_metadata
+WHERE instance_id = ? AND status = 'active'
+ORDER BY created_at ASC;
+
+-- name: ListAllWorktrees :many
+SELECT * FROM worktree_metadata
+WHERE instance_id = ?
+ORDER BY created_at DESC;
+
+-- name: UpdateWorktreeActivity :exec
+UPDATE worktree_metadata
+SET last_activity_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
+WHERE id = ?;
+
+-- name: UpdateWorktreeStatus :exec
+UPDATE worktree_metadata
+SET status = ?, updated_at = datetime('now', 'utc')
+WHERE id = ?;
+
+-- name: UpdateWorktreeDeleted :exec
+UPDATE worktree_metadata
+SET status = 'completed', deletion_reason = ?, deleted_at = datetime('now', 'utc'), updated_at = datetime('now', 'utc')
+WHERE id = ?;
+
+-- name: UpdateWorktreeDiskUsage :exec
+UPDATE worktree_metadata
+SET disk_usage_bytes = ?, has_uncommitted_changes = ?, updated_at = datetime('now', 'utc')
+WHERE id = ?;
+
+-- name: ListAbandonedWorktrees :many
+SELECT * FROM worktree_metadata
+WHERE instance_id = ? AND status = 'active'
+AND last_activity_at < datetime('now', 'utc', '-24 hours')
+ORDER BY last_activity_at ASC;
+
+-- name: CreateHealthCheck :one
+INSERT INTO worktree_health_checks (id, worktree_id, status, git_fsck_ok, has_uncommitted_changes, disk_usage_bytes, error_message)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListHealthChecksByWorktree :many
+SELECT * FROM worktree_health_checks
+WHERE worktree_id = ?
+ORDER BY checked_at DESC
+LIMIT 10;
+
+-- name: GetLatestHealthCheck :one
+SELECT * FROM worktree_health_checks
+WHERE worktree_id = ?
+ORDER BY checked_at DESC
+LIMIT 1;
+
 -- Auth session queries
 
 -- name: CreateAuthSession :one

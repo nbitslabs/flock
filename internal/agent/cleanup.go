@@ -28,19 +28,21 @@ const (
 
 // WorktreeCleaner handles automatic worktree cleanup based on task lifecycle.
 type WorktreeCleaner struct {
-	queries *sqlc.Queries
-	dataDir string
-	org     string
-	repo    string
+	queries    *sqlc.Queries
+	dataDir    string
+	org        string
+	repo       string
+	instanceID string
 }
 
 // NewWorktreeCleaner creates a new WorktreeCleaner.
-func NewWorktreeCleaner(queries *sqlc.Queries, dataDir, org, repo string) *WorktreeCleaner {
+func NewWorktreeCleaner(queries *sqlc.Queries, dataDir, instanceID, org, repo string) *WorktreeCleaner {
 	return &WorktreeCleaner{
-		queries: queries,
-		dataDir: dataDir,
-		org:     org,
-		repo:    repo,
+		queries:    queries,
+		dataDir:    dataDir,
+		org:        org,
+		repo:       repo,
+		instanceID: instanceID,
 	}
 }
 
@@ -188,6 +190,8 @@ func (wc *WorktreeCleaner) doCleanup(task sqlc.Task) CleanupResult {
 		result.Action = "removed"
 		log.Printf("agent: cleanup: removed worktree for task %s (branch %s)",
 			truncID(task.ID), task.BranchName)
+		// Record deletion in metadata
+		RecordWorktreeDeletion(context.Background(), wc.queries, wc.instanceID, task.BranchName, task.Status)
 		return result
 	}
 

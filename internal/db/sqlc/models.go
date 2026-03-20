@@ -73,3 +73,31 @@ type Task struct {
 	CreatedAt      string
 	UpdatedAt      string
 }
+
+type WorktreeHealthCheck struct {
+	ID                    string
+	WorktreeID            string
+	Status                string
+	GitFsckOk             int64
+	HasUncommittedChanges int64
+	DiskUsageBytes        int64
+	ErrorMessage          string
+	CheckedAt             string
+}
+
+type WorktreeMetadatum struct {
+	ID                    string
+	InstanceID            string
+	BranchName            string
+	WorktreePath          string
+	IssueNumber           int64
+	AgentSessionID        string
+	Status                string
+	DeletionReason        string
+	DiskUsageBytes        int64
+	HasUncommittedChanges int64
+	LastActivityAt        string
+	CreatedAt             string
+	UpdatedAt             string
+	DeletedAt             string
+}

@@ -12,15 +12,17 @@ import (
 
 // Scheduler runs the heartbeat loop for a single instance.
 type Scheduler struct {
-	instanceID   string
-	dataDir      string
-	cfg          AgentConfig
-	orchestrator *Orchestrator
-	processor    *DecisionProcessor
-	cleaner      *WorktreeCleaner
-	queries      *sqlc.Queries
-	client       *opencode.Client
-	cancel       context.CancelFunc
+	instanceID    string
+	dataDir       string
+	cfg           AgentConfig
+	orchestrator  *Orchestrator
+	processor     *DecisionProcessor
+	cleaner       *WorktreeCleaner
+	healthChecker *HealthChecker
+	queries       *sqlc.Queries
+	client        *opencode.Client
+	cancel        context.CancelFunc
+	heartbeatNum  int // tracks heartbeat count for periodic health checks
 }
 
 func NewScheduler(
@@ -29,18 +31,20 @@ func NewScheduler(
 	orchestrator *Orchestrator,
 	processor *DecisionProcessor,
 	cleaner *WorktreeCleaner,
+	healthChecker *HealthChecker,
 	queries *sqlc.Queries,
 	client *opencode.Client,
 ) *Scheduler {
 	return &Scheduler{
-		instanceID:   instanceID,
-		dataDir:      dataDir,
-		cfg:          cfg,
-		orchestrator: orchestrator,
-		processor:    processor,
-		cleaner:      cleaner,
-		queries:      queries,
-		client:       client,
+		instanceID:    instanceID,
+		dataDir:       dataDir,
+		cfg:           cfg,
+		orchestrator:  orchestrator,
+		processor:     processor,
+		cleaner:       cleaner,
+		healthChecker: healthChecker,
+		queries:       queries,
+		client:        client,
 	}
 }
 
@@ -111,6 +115,19 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 		for _, r := range results {
 			if r.Action == "failed" {
 				log.Printf("agent: cleanup failed for task %s: %v", truncID(r.TaskID), r.Error)
+			}
+		}
+	}
+
+	// 5. Run health checks every 2nd heartbeat (roughly every 10 minutes
+	// with default 5-minute interval)
+	s.heartbeatNum++
+	if s.healthChecker != nil && s.heartbeatNum%2 == 0 {
+		results := s.healthChecker.RunHealthChecks(ctx)
+		for _, r := range results {
+			if r.Status == "corrupted" || r.Status == "missing" {
+				log.Printf("agent: healthcheck: worktree %s is %s: %s",
+					truncID(r.WorktreeID), r.Status, r.ErrorMessage)
 			}
 		}
 	}
