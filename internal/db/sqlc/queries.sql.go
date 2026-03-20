@@ -74,6 +74,41 @@ func (q *Queries) CreateAuthSession(ctx context.Context, arg CreateAuthSessionPa
 	return i, err
 }
 
+const createCrossRepoTask = `-- name: CreateCrossRepoTask :one
+
+INSERT INTO cross_repo_tasks (id, parent_task_id, child_task_id, child_instance_id)
+VALUES (?, ?, ?, ?)
+RETURNING id, parent_task_id, child_task_id, child_instance_id, status, created_at, updated_at
+`
+
+type CreateCrossRepoTaskParams struct {
+	ID              string
+	ParentTaskID    string
+	ChildTaskID     string
+	ChildInstanceID string
+}
+
+// Cross-repo task queries
+func (q *Queries) CreateCrossRepoTask(ctx context.Context, arg CreateCrossRepoTaskParams) (CrossRepoTask, error) {
+	row := q.db.QueryRowContext(ctx, createCrossRepoTask,
+		arg.ID,
+		arg.ParentTaskID,
+		arg.ChildTaskID,
+		arg.ChildInstanceID,
+	)
+	var i CrossRepoTask
+	err := row.Scan(
+		&i.ID,
+		&i.ParentTaskID,
+		&i.ChildTaskID,
+		&i.ChildInstanceID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createFlockAgentSession = `-- name: CreateFlockAgentSession :one
 
 INSERT INTO flock_agent_sessions (id, session_id, working_directory, status)
@@ -204,6 +239,79 @@ func (q *Queries) CreateOrchestratorSession(ctx context.Context, arg CreateOrche
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastHeartbeatAt,
+	)
+	return i, err
+}
+
+const createPRSet = `-- name: CreatePRSet :one
+
+INSERT INTO pr_sets (id, group_name, deployment_order)
+VALUES (?, ?, ?)
+RETURNING id, group_name, status, deployment_order, created_at, updated_at
+`
+
+type CreatePRSetParams struct {
+	ID              string
+	GroupName       string
+	DeploymentOrder sql.NullString
+}
+
+// PR set queries
+func (q *Queries) CreatePRSet(ctx context.Context, arg CreatePRSetParams) (PrSet, error) {
+	row := q.db.QueryRowContext(ctx, createPRSet, arg.ID, arg.GroupName, arg.DeploymentOrder)
+	var i PrSet
+	err := row.Scan(
+		&i.ID,
+		&i.GroupName,
+		&i.Status,
+		&i.DeploymentOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createPRSetMember = `-- name: CreatePRSetMember :one
+INSERT INTO pr_set_members (id, pr_set_id, instance_id, org, repo, pr_url, pr_number, merge_order)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, pr_set_id, instance_id, org, repo, pr_url, pr_number, status, merge_order, merged_at, created_at
+`
+
+type CreatePRSetMemberParams struct {
+	ID         string
+	PrSetID    string
+	InstanceID string
+	Org        string
+	Repo       string
+	PrUrl      string
+	PrNumber   int64
+	MergeOrder int64
+}
+
+func (q *Queries) CreatePRSetMember(ctx context.Context, arg CreatePRSetMemberParams) (PrSetMember, error) {
+	row := q.db.QueryRowContext(ctx, createPRSetMember,
+		arg.ID,
+		arg.PrSetID,
+		arg.InstanceID,
+		arg.Org,
+		arg.Repo,
+		arg.PrUrl,
+		arg.PrNumber,
+		arg.MergeOrder,
+	)
+	var i PrSetMember
+	err := row.Scan(
+		&i.ID,
+		&i.PrSetID,
+		&i.InstanceID,
+		&i.Org,
+		&i.Repo,
+		&i.PrUrl,
+		&i.PrNumber,
+		&i.Status,
+		&i.MergeOrder,
+		&i.MergedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -430,6 +538,15 @@ func (q *Queries) DeleteOrchestratorSessionsByInstance(ctx context.Context, inst
 	return err
 }
 
+const deleteRepoManifest = `-- name: DeleteRepoManifest :exec
+DELETE FROM repo_manifests WHERE id = ?
+`
+
+func (q *Queries) DeleteRepoManifest(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteRepoManifest, id)
+	return err
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = ?
 `
@@ -627,6 +744,74 @@ func (q *Queries) GetLatestHealthCheck(ctx context.Context, worktreeID string) (
 		&i.DiskUsageBytes,
 		&i.ErrorMessage,
 		&i.CheckedAt,
+	)
+	return i, err
+}
+
+const getPRSet = `-- name: GetPRSet :one
+SELECT id, group_name, status, deployment_order, created_at, updated_at FROM pr_sets WHERE id = ?
+`
+
+func (q *Queries) GetPRSet(ctx context.Context, id string) (PrSet, error) {
+	row := q.db.QueryRowContext(ctx, getPRSet, id)
+	var i PrSet
+	err := row.Scan(
+		&i.ID,
+		&i.GroupName,
+		&i.Status,
+		&i.DeploymentOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRepoManifest = `-- name: GetRepoManifest :one
+SELECT id, instance_id, org, repo, group_name, manifest_json, valid, validation_error, created_at, updated_at FROM repo_manifests WHERE instance_id = ? AND org = ? AND repo = ?
+`
+
+type GetRepoManifestParams struct {
+	InstanceID string
+	Org        string
+	Repo       string
+}
+
+func (q *Queries) GetRepoManifest(ctx context.Context, arg GetRepoManifestParams) (RepoManifest, error) {
+	row := q.db.QueryRowContext(ctx, getRepoManifest, arg.InstanceID, arg.Org, arg.Repo)
+	var i RepoManifest
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.Org,
+		&i.Repo,
+		&i.GroupName,
+		&i.ManifestJson,
+		&i.Valid,
+		&i.ValidationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRepoManifestByID = `-- name: GetRepoManifestByID :one
+SELECT id, instance_id, org, repo, group_name, manifest_json, valid, validation_error, created_at, updated_at FROM repo_manifests WHERE id = ?
+`
+
+func (q *Queries) GetRepoManifestByID(ctx context.Context, id string) (RepoManifest, error) {
+	row := q.db.QueryRowContext(ctx, getRepoManifestByID, id)
+	var i RepoManifest
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.Org,
+		&i.Repo,
+		&i.GroupName,
+		&i.ManifestJson,
+		&i.Valid,
+		&i.ValidationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -931,6 +1116,44 @@ func (q *Queries) ListActiveWorktrees(ctx context.Context, instanceID string) ([
 	return items, nil
 }
 
+const listAllManifests = `-- name: ListAllManifests :many
+SELECT id, instance_id, org, repo, group_name, manifest_json, valid, validation_error, created_at, updated_at FROM repo_manifests ORDER BY group_name, org, repo
+`
+
+func (q *Queries) ListAllManifests(ctx context.Context) ([]RepoManifest, error) {
+	rows, err := q.db.QueryContext(ctx, listAllManifests)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RepoManifest
+	for rows.Next() {
+		var i RepoManifest
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.Org,
+			&i.Repo,
+			&i.GroupName,
+			&i.ManifestJson,
+			&i.Valid,
+			&i.ValidationError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllWorktrees = `-- name: ListAllWorktrees :many
 SELECT id, instance_id, branch_name, worktree_path, issue_number, agent_session_id, status, deletion_reason, disk_usage_bytes, has_uncommitted_changes, last_activity_at, created_at, updated_at, deleted_at FROM worktree_metadata
 WHERE instance_id = ?
@@ -999,6 +1222,76 @@ func (q *Queries) ListCompletedTasks(ctx context.Context, instanceID string) ([]
 			&i.BranchName,
 			&i.PrUrl,
 			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCrossRepoTasksByChild = `-- name: ListCrossRepoTasksByChild :many
+SELECT id, parent_task_id, child_task_id, child_instance_id, status, created_at, updated_at FROM cross_repo_tasks WHERE child_task_id = ?
+`
+
+func (q *Queries) ListCrossRepoTasksByChild(ctx context.Context, childTaskID string) ([]CrossRepoTask, error) {
+	rows, err := q.db.QueryContext(ctx, listCrossRepoTasksByChild, childTaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CrossRepoTask
+	for rows.Next() {
+		var i CrossRepoTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentTaskID,
+			&i.ChildTaskID,
+			&i.ChildInstanceID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCrossRepoTasksByParent = `-- name: ListCrossRepoTasksByParent :many
+SELECT id, parent_task_id, child_task_id, child_instance_id, status, created_at, updated_at FROM cross_repo_tasks WHERE parent_task_id = ? ORDER BY created_at
+`
+
+func (q *Queries) ListCrossRepoTasksByParent(ctx context.Context, parentTaskID string) ([]CrossRepoTask, error) {
+	rows, err := q.db.QueryContext(ctx, listCrossRepoTasksByParent, parentTaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CrossRepoTask
+	for rows.Next() {
+		var i CrossRepoTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentTaskID,
+			&i.ChildTaskID,
+			&i.ChildInstanceID,
+			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1223,6 +1516,117 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 			&i.HeartbeatHash,
 			&i.Org,
 			&i.Repo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listManifestsByGroup = `-- name: ListManifestsByGroup :many
+SELECT id, instance_id, org, repo, group_name, manifest_json, valid, validation_error, created_at, updated_at FROM repo_manifests WHERE group_name = ? ORDER BY org, repo
+`
+
+func (q *Queries) ListManifestsByGroup(ctx context.Context, groupName string) ([]RepoManifest, error) {
+	rows, err := q.db.QueryContext(ctx, listManifestsByGroup, groupName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RepoManifest
+	for rows.Next() {
+		var i RepoManifest
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.Org,
+			&i.Repo,
+			&i.GroupName,
+			&i.ManifestJson,
+			&i.Valid,
+			&i.ValidationError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPRSetMembers = `-- name: ListPRSetMembers :many
+SELECT id, pr_set_id, instance_id, org, repo, pr_url, pr_number, status, merge_order, merged_at, created_at FROM pr_set_members WHERE pr_set_id = ? ORDER BY merge_order
+`
+
+func (q *Queries) ListPRSetMembers(ctx context.Context, prSetID string) ([]PrSetMember, error) {
+	rows, err := q.db.QueryContext(ctx, listPRSetMembers, prSetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PrSetMember
+	for rows.Next() {
+		var i PrSetMember
+		if err := rows.Scan(
+			&i.ID,
+			&i.PrSetID,
+			&i.InstanceID,
+			&i.Org,
+			&i.Repo,
+			&i.PrUrl,
+			&i.PrNumber,
+			&i.Status,
+			&i.MergeOrder,
+			&i.MergedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPRSets = `-- name: ListPRSets :many
+SELECT id, group_name, status, deployment_order, created_at, updated_at FROM pr_sets WHERE group_name = ? ORDER BY created_at DESC
+`
+
+func (q *Queries) ListPRSets(ctx context.Context, groupName string) ([]PrSet, error) {
+	rows, err := q.db.QueryContext(ctx, listPRSets, groupName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PrSet
+	for rows.Next() {
+		var i PrSet
+		if err := rows.Scan(
+			&i.ID,
+			&i.GroupName,
+			&i.Status,
+			&i.DeploymentOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1547,6 +1951,20 @@ func (q *Queries) RetireOrchestratorSession(ctx context.Context, id string) erro
 	return err
 }
 
+const updateCrossRepoTaskStatus = `-- name: UpdateCrossRepoTaskStatus :exec
+UPDATE cross_repo_tasks SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?
+`
+
+type UpdateCrossRepoTaskStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) UpdateCrossRepoTaskStatus(ctx context.Context, arg UpdateCrossRepoTaskStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateCrossRepoTaskStatus, arg.Status, arg.ID)
+	return err
+}
+
 const updateFlockAgentSession = `-- name: UpdateFlockAgentSession :exec
 UPDATE flock_agent_sessions SET session_id = ?, status = ?, updated_at = datetime('now') WHERE id = ?
 `
@@ -1587,6 +2005,58 @@ type UpdateInstanceStatusParams struct {
 
 func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateInstanceStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updateManifestValidation = `-- name: UpdateManifestValidation :exec
+UPDATE repo_manifests SET valid = ?, validation_error = ?, updated_at = datetime('now', 'utc') WHERE id = ?
+`
+
+type UpdateManifestValidationParams struct {
+	Valid           bool
+	ValidationError sql.NullString
+	ID              string
+}
+
+func (q *Queries) UpdateManifestValidation(ctx context.Context, arg UpdateManifestValidationParams) error {
+	_, err := q.db.ExecContext(ctx, updateManifestValidation, arg.Valid, arg.ValidationError, arg.ID)
+	return err
+}
+
+const updatePRSetMemberMerged = `-- name: UpdatePRSetMemberMerged :exec
+UPDATE pr_set_members SET status = 'merged', merged_at = datetime('now', 'utc') WHERE id = ?
+`
+
+func (q *Queries) UpdatePRSetMemberMerged(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, updatePRSetMemberMerged, id)
+	return err
+}
+
+const updatePRSetMemberStatus = `-- name: UpdatePRSetMemberStatus :exec
+UPDATE pr_set_members SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?
+`
+
+type UpdatePRSetMemberStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) UpdatePRSetMemberStatus(ctx context.Context, arg UpdatePRSetMemberStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updatePRSetMemberStatus, arg.Status, arg.ID)
+	return err
+}
+
+const updatePRSetStatus = `-- name: UpdatePRSetStatus :exec
+UPDATE pr_sets SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?
+`
+
+type UpdatePRSetStatusParams struct {
+	Status string
+	ID     string
+}
+
+func (q *Queries) UpdatePRSetStatus(ctx context.Context, arg UpdatePRSetStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updatePRSetStatus, arg.Status, arg.ID)
 	return err
 }
 
@@ -1727,6 +2197,54 @@ type UpdateWorktreeStatusParams struct {
 func (q *Queries) UpdateWorktreeStatus(ctx context.Context, arg UpdateWorktreeStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateWorktreeStatus, arg.Status, arg.ID)
 	return err
+}
+
+const upsertRepoManifest = `-- name: UpsertRepoManifest :one
+
+INSERT INTO repo_manifests (id, instance_id, org, repo, group_name, manifest_json)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(instance_id, org, repo) DO UPDATE SET
+  group_name = excluded.group_name,
+  manifest_json = excluded.manifest_json,
+  valid = TRUE,
+  validation_error = NULL,
+  updated_at = datetime('now', 'utc')
+RETURNING id, instance_id, org, repo, group_name, manifest_json, valid, validation_error, created_at, updated_at
+`
+
+type UpsertRepoManifestParams struct {
+	ID           string
+	InstanceID   string
+	Org          string
+	Repo         string
+	GroupName    string
+	ManifestJson string
+}
+
+// Repository manifest queries
+func (q *Queries) UpsertRepoManifest(ctx context.Context, arg UpsertRepoManifestParams) (RepoManifest, error) {
+	row := q.db.QueryRowContext(ctx, upsertRepoManifest,
+		arg.ID,
+		arg.InstanceID,
+		arg.Org,
+		arg.Repo,
+		arg.GroupName,
+		arg.ManifestJson,
+	)
+	var i RepoManifest
+	err := row.Scan(
+		&i.ID,
+		&i.InstanceID,
+		&i.Org,
+		&i.Repo,
+		&i.GroupName,
+		&i.ManifestJson,
+		&i.Valid,
+		&i.ValidationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertSession = `-- name: UpsertSession :exec

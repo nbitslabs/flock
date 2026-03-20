@@ -16,6 +16,16 @@ type AuthSession struct {
 	ExpiresAt string
 }
 
+type CrossRepoTask struct {
+	ID              string
+	ParentTaskID    string
+	ChildTaskID     string
+	ChildInstanceID string
+	Status          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type FlockAgentSession struct {
 	ID               string
 	SessionID        string
@@ -76,6 +86,42 @@ type OrchestratorSession struct {
 	CreatedAt       string
 	UpdatedAt       string
 	LastHeartbeatAt string
+}
+
+type PrSet struct {
+	ID              string
+	GroupName       string
+	Status          string
+	DeploymentOrder sql.NullString
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type PrSetMember struct {
+	ID         string
+	PrSetID    string
+	InstanceID string
+	Org        string
+	Repo       string
+	PrUrl      string
+	PrNumber   int64
+	Status     string
+	MergeOrder int64
+	MergedAt   sql.NullTime
+	CreatedAt  time.Time
+}
+
+type RepoManifest struct {
+	ID              string
+	InstanceID      string
+	Org             string
+	Repo            string
+	GroupName       string
+	ManifestJson    string
+	Valid           bool
+	ValidationError sql.NullString
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type Session struct {

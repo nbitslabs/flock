@@ -290,3 +290,80 @@ LIMIT ?;
 -- name: CountFailuresByTestName :one
 SELECT COUNT(*) FROM test_failures
 WHERE instance_id = ? AND test_name = ?;
+
+-- Repository manifest queries
+
+-- name: UpsertRepoManifest :one
+INSERT INTO repo_manifests (id, instance_id, org, repo, group_name, manifest_json)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(instance_id, org, repo) DO UPDATE SET
+  group_name = excluded.group_name,
+  manifest_json = excluded.manifest_json,
+  valid = TRUE,
+  validation_error = NULL,
+  updated_at = datetime('now', 'utc')
+RETURNING *;
+
+-- name: GetRepoManifest :one
+SELECT * FROM repo_manifests WHERE instance_id = ? AND org = ? AND repo = ?;
+
+-- name: GetRepoManifestByID :one
+SELECT * FROM repo_manifests WHERE id = ?;
+
+-- name: ListManifestsByGroup :many
+SELECT * FROM repo_manifests WHERE group_name = ? ORDER BY org, repo;
+
+-- name: ListAllManifests :many
+SELECT * FROM repo_manifests ORDER BY group_name, org, repo;
+
+-- name: UpdateManifestValidation :exec
+UPDATE repo_manifests SET valid = ?, validation_error = ?, updated_at = datetime('now', 'utc') WHERE id = ?;
+
+-- name: DeleteRepoManifest :exec
+DELETE FROM repo_manifests WHERE id = ?;
+
+-- Cross-repo task queries
+
+-- name: CreateCrossRepoTask :one
+INSERT INTO cross_repo_tasks (id, parent_task_id, child_task_id, child_instance_id)
+VALUES (?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListCrossRepoTasksByParent :many
+SELECT * FROM cross_repo_tasks WHERE parent_task_id = ? ORDER BY created_at;
+
+-- name: ListCrossRepoTasksByChild :many
+SELECT * FROM cross_repo_tasks WHERE child_task_id = ?;
+
+-- name: UpdateCrossRepoTaskStatus :exec
+UPDATE cross_repo_tasks SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?;
+
+-- PR set queries
+
+-- name: CreatePRSet :one
+INSERT INTO pr_sets (id, group_name, deployment_order)
+VALUES (?, ?, ?)
+RETURNING *;
+
+-- name: GetPRSet :one
+SELECT * FROM pr_sets WHERE id = ?;
+
+-- name: ListPRSets :many
+SELECT * FROM pr_sets WHERE group_name = ? ORDER BY created_at DESC;
+
+-- name: UpdatePRSetStatus :exec
+UPDATE pr_sets SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?;
+
+-- name: CreatePRSetMember :one
+INSERT INTO pr_set_members (id, pr_set_id, instance_id, org, repo, pr_url, pr_number, merge_order)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: ListPRSetMembers :many
+SELECT * FROM pr_set_members WHERE pr_set_id = ? ORDER BY merge_order;
+
+-- name: UpdatePRSetMemberStatus :exec
+UPDATE pr_set_members SET status = ?, updated_at = datetime('now', 'utc') WHERE id = ?;
+
+-- name: UpdatePRSetMemberMerged :exec
+UPDATE pr_set_members SET status = 'merged', merged_at = datetime('now', 'utc') WHERE id = ?;

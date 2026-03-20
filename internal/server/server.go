@@ -106,6 +106,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/memory/query", s.handleMemoryQuery)
 	s.mux.HandleFunc("GET /api/memory/categories", s.handleListMemoryCategories)
 
+	// Cross-repo / Manifest API
+	s.mux.HandleFunc("GET /api/instances/{id}/manifest", s.handleGetManifest)
+	s.mux.HandleFunc("PUT /api/instances/{id}/manifest", s.handlePutManifest)
+	s.mux.HandleFunc("GET /api/manifests", s.handleListManifests)
+	s.mux.HandleFunc("GET /api/dependency-graph", s.handleGetDependencyGraph)
+
 	// Dashboard API
 	s.mux.HandleFunc("GET /api/dashboard/tasks", s.handleDashboardTasks)
 	s.mux.HandleFunc("GET /api/dashboard/worktrees", s.handleDashboardWorktrees)
