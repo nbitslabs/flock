@@ -1656,7 +1656,7 @@
     function switchNav(view) {
         store.currentNav = view;
         const navBtns = document.querySelectorAll('[data-nav]');
-        const panels = ['sidebar-conversations', 'sidebar-tasks', 'sidebar-worktrees', 'sidebar-memory'];
+        const panels = ['sidebar-conversations', 'sidebar-tasks', 'sidebar-worktrees', 'sidebar-memory', 'sidebar-sync'];
         navBtns.forEach(btn => {
             const active = btn.dataset.nav === view;
             btn.className = `flex-1 px-3 py-2 text-xs font-semibold ${active ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`;
@@ -1671,6 +1671,7 @@
         if (view === 'tasks') refreshDashboardTasks();
         if (view === 'worktrees') refreshDashboardWorktrees();
         if (view === 'memory') refreshDashboardMemory();
+        if (view === 'sync') refreshDashboardSync();
 
         // Show/hide main content area based on view
         const mainMessages = document.getElementById('messages');
@@ -1702,6 +1703,7 @@
             case 'tasks': renderTaskDashboard(container); break;
             case 'worktrees': renderWorktreeDashboard(container); break;
             case 'memory': renderMemoryDashboard(container); break;
+            case 'sync': renderSyncDashboard(container); break;
         }
     }
 
@@ -2134,6 +2136,205 @@
         container.appendChild(inner);
     }
 
+    // --- Repository Synchronization Dashboard (WO-28) ---
+
+    store.dashboardSync = null;
+    store._syncGroup = '';
+
+    async function refreshDashboardSync() {
+        const groupInput = document.getElementById('sync-group-input');
+        const group = groupInput?.value?.trim() || store._syncGroup || '';
+        store._syncGroup = group;
+
+        try {
+            const params = group ? `?group=${encodeURIComponent(group)}` : '';
+            const data = await api('GET', `/api/dashboard/sync${params}`);
+            store.dashboardSync = data;
+            renderSyncSidebar();
+            if (store.currentNav === 'sync') {
+                const container = document.getElementById('dashboard-main');
+                if (container) renderSyncDashboard(container);
+            }
+        } catch (e) { console.error('refreshDashboardSync:', e); }
+    }
+
+    function renderSyncSidebar() {
+        const container = document.getElementById('sync-sidebar-summary');
+        if (!container) return;
+        container.textContent = '';
+        const data = store.dashboardSync;
+        if (!data) {
+            container.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 py-2', textContent: 'Enter a group name above' }));
+            return;
+        }
+
+        const tasks = data.cross_repo_tasks || [];
+        const prSets = data.pr_sets || [];
+
+        // Cross-repo task summary
+        const taskSection = h('div', { className: 'mb-3' });
+        taskSection.appendChild(h('div', { className: 'text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-2 py-1', textContent: 'Cross-Repo Tasks' }));
+        if (tasks.length === 0) {
+            taskSection.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 px-2', textContent: 'No tasks' }));
+        } else {
+            const byStatus = {};
+            for (const t of tasks) { byStatus[t.status] = (byStatus[t.status] || 0) + 1; }
+            for (const [status, count] of Object.entries(byStatus)) {
+                const row = h('div', { className: 'flex items-center justify-between px-2 py-0.5 text-xs' });
+                row.appendChild(h('span', { className: 'text-gray-500 dark:text-gray-400', textContent: status }));
+                row.appendChild(h('span', { className: 'text-gray-700 dark:text-gray-200 font-medium', textContent: String(count) }));
+                taskSection.appendChild(row);
+            }
+        }
+        container.appendChild(taskSection);
+
+        // PR set summary
+        const prSection = h('div', { className: 'mb-3' });
+        prSection.appendChild(h('div', { className: 'text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider px-2 py-1', textContent: 'PR Sets' }));
+        if (prSets.length === 0) {
+            prSection.appendChild(h('p', { className: 'text-xs text-gray-400 dark:text-gray-500 px-2', textContent: 'No PR sets' }));
+        } else {
+            for (const ps of prSets) {
+                const el = h('div', { className: 'flex items-center gap-2 px-2 py-1 text-xs' });
+                const color = ps.status === 'merged' ? 'bg-green-500' : ps.status === 'open' ? 'bg-blue-500' : 'bg-gray-500';
+                el.appendChild(h('span', { className: `w-2 h-2 rounded-full ${color} flex-shrink-0` }));
+                el.appendChild(h('span', { className: 'text-gray-700 dark:text-gray-200 truncate', textContent: `${ps.merged_count}/${ps.member_count} merged` }));
+                prSection.appendChild(el);
+            }
+        }
+        container.appendChild(prSection);
+    }
+
+    function renderSyncDashboard(container) {
+        container.textContent = '';
+        const inner = h('div', { className: 'max-w-6xl mx-auto p-6 space-y-6' });
+        inner.appendChild(h('h2', { className: 'text-xl font-bold text-gray-900 dark:text-white', textContent: 'Repository Synchronization' }));
+
+        const data = store.dashboardSync;
+        if (!data) {
+            inner.appendChild(h('div', { className: 'text-center text-gray-500 dark:text-gray-600 py-20', textContent: 'Enter a group name in the sidebar to view sync status.' }));
+            container.appendChild(inner);
+            return;
+        }
+
+        const tasks = data.cross_repo_tasks || [];
+        const prSets = data.pr_sets || [];
+        const graph = data.dependency_graph;
+
+        // Summary cards
+        const pending = tasks.filter(t => t.status === 'pending').length;
+        const completed = tasks.filter(t => t.status === 'completed').length;
+        const cards = h('div', { className: 'grid grid-cols-2 md:grid-cols-4 gap-4' });
+        cards.appendChild(makeStatCard('Cross-Repo Tasks', String(tasks.length), 'blue'));
+        cards.appendChild(makeStatCard('Completed', String(completed), 'green'));
+        cards.appendChild(makeStatCard('Pending', String(pending), pending > 0 ? 'yellow' : 'green'));
+        cards.appendChild(makeStatCard('PR Sets', String(prSets.length), 'purple'));
+        inner.appendChild(cards);
+
+        // Dependency graph visualization (Mermaid-style text)
+        if (graph && graph.nodes && graph.nodes.length > 0) {
+            const graphSection = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4' });
+            graphSection.appendChild(h('h3', { className: 'text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3', textContent: 'Dependency Graph' }));
+
+            // Render nodes and edges as a visual list
+            const graphGrid = h('div', { className: 'space-y-2' });
+
+            // Deployment order
+            if (graph.deployment_order && graph.deployment_order.length > 0) {
+                const orderRow = h('div', { className: 'flex items-center gap-2 flex-wrap' });
+                orderRow.appendChild(h('span', { className: 'text-xs text-gray-500 dark:text-gray-400 font-semibold', textContent: 'Deploy order:' }));
+                for (let i = 0; i < graph.deployment_order.length; i++) {
+                    const node = graph.deployment_order[i];
+                    orderRow.appendChild(h('span', { className: 'text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded', textContent: node }));
+                    if (i < graph.deployment_order.length - 1) {
+                        orderRow.appendChild(h('span', { className: 'text-xs text-gray-400', textContent: '\u2192' }));
+                    }
+                }
+                graphGrid.appendChild(orderRow);
+            }
+
+            // Edge list
+            if (graph.edges && graph.edges.length > 0) {
+                const edgeHeader = h('div', { className: 'text-xs text-gray-500 dark:text-gray-400 font-semibold mt-2', textContent: 'Dependencies:' });
+                graphGrid.appendChild(edgeHeader);
+                for (const edge of graph.edges) {
+                    const edgeRow = h('div', { className: 'flex items-center gap-2 text-xs pl-2' });
+                    edgeRow.appendChild(h('span', { className: 'text-gray-700 dark:text-gray-200', textContent: edge.from }));
+                    edgeRow.appendChild(h('span', { className: 'text-gray-400', textContent: `\u2192 ${edge.type} \u2192` }));
+                    edgeRow.appendChild(h('span', { className: 'text-gray-700 dark:text-gray-200', textContent: edge.to }));
+                    graphGrid.appendChild(edgeRow);
+                }
+            }
+
+            graphSection.appendChild(graphGrid);
+            inner.appendChild(graphSection);
+        }
+
+        // Cross-repo tasks table
+        if (tasks.length > 0) {
+            const taskSection = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden' });
+            taskSection.appendChild(h('div', {
+                className: 'px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm text-gray-700 dark:text-gray-200',
+                textContent: 'Cross-Repository Tasks',
+            }));
+
+            const header = h('div', { className: 'grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase' });
+            header.appendChild(h('div', { className: 'col-span-1', textContent: 'Status' }));
+            header.appendChild(h('div', { className: 'col-span-3', textContent: 'Child Repo' }));
+            header.appendChild(h('div', { className: 'col-span-4', textContent: 'Parent Task' }));
+            header.appendChild(h('div', { className: 'col-span-4', textContent: 'Created' }));
+            taskSection.appendChild(header);
+
+            for (const t of tasks) {
+                const row = h('div', { className: 'grid grid-cols-12 gap-2 px-4 py-2 border-b border-gray-100 dark:border-gray-700 last:border-b-0 text-sm' });
+                const color = t.status === 'completed' ? 'bg-green-500' : t.status === 'pending' ? 'bg-yellow-500' : 'bg-blue-500';
+                row.appendChild(h('div', { className: 'col-span-1 flex items-center' }, h('span', { className: `w-2 h-2 rounded-full ${color}` })));
+                row.appendChild(h('div', { className: 'col-span-3 text-gray-700 dark:text-gray-200 truncate', textContent: t.child_org && t.child_repo ? `${t.child_org}/${t.child_repo}` : t.child_instance_id.slice(0, 8) }));
+                row.appendChild(h('div', { className: 'col-span-4 text-gray-500 dark:text-gray-400 truncate', textContent: t.parent_task_id.slice(0, 12) }));
+                row.appendChild(h('div', { className: 'col-span-4 text-gray-500 dark:text-gray-400', textContent: t.created_at ? formatRelativeTime(t.created_at) : '-' }));
+                taskSection.appendChild(row);
+            }
+            inner.appendChild(taskSection);
+        }
+
+        // PR sets table
+        if (prSets.length > 0) {
+            const prSection = h('div', { className: 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden' });
+            prSection.appendChild(h('div', {
+                className: 'px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm text-gray-700 dark:text-gray-200',
+                textContent: 'PR Sets',
+            }));
+
+            for (const ps of prSets) {
+                const row = h('div', { className: 'flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0' });
+                const left = h('div', { className: 'flex items-center gap-3' });
+                const statusColor = ps.status === 'merged' ? 'bg-green-500' : ps.status === 'open' ? 'bg-blue-500' : 'bg-gray-500';
+                left.appendChild(h('span', { className: `w-2 h-2 rounded-full ${statusColor}` }));
+                left.appendChild(h('span', { className: 'text-sm text-gray-700 dark:text-gray-200', textContent: ps.group_name }));
+                left.appendChild(h('span', { className: 'text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded', textContent: ps.status }));
+                row.appendChild(left);
+
+                const right = h('div', { className: 'text-sm text-gray-500 dark:text-gray-400' });
+                right.textContent = `${ps.merged_count}/${ps.member_count} merged`;
+                row.appendChild(right);
+                prSection.appendChild(row);
+            }
+            inner.appendChild(prSection);
+        }
+
+        if (tasks.length === 0 && prSets.length === 0 && !graph) {
+            inner.appendChild(h('div', { className: 'text-center text-gray-500 dark:text-gray-600 py-20', textContent: 'No sync data found. Configure repository manifests to enable cross-repo coordination.' }));
+        }
+
+        container.appendChild(inner);
+    }
+
+    // Sync group input listener
+    document.getElementById('sync-group-input')?.addEventListener('change', () => {
+        store._syncGroup = document.getElementById('sync-group-input')?.value?.trim() || '';
+        refreshDashboardSync();
+    });
+
     // --- Search (WO-18) ---
 
     let searchTimeout = null;
@@ -2250,6 +2451,7 @@
             if (e.key === '2') { switchNav('tasks'); return; }
             if (e.key === '3') { switchNav('worktrees'); return; }
             if (e.key === '4') { switchNav('memory'); return; }
+            if (e.key === '5') { switchNav('sync'); return; }
         });
     }
 

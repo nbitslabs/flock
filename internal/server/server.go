@@ -115,11 +115,14 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("PUT /api/instances/{id}/manifest", s.handlePutManifest)
 	s.mux.HandleFunc("GET /api/manifests", s.handleListManifests)
 	s.mux.HandleFunc("GET /api/dependency-graph", s.handleGetDependencyGraph)
+	s.mux.HandleFunc("GET /api/pr-sets", s.handleListPRSets)
+	s.mux.HandleFunc("GET /api/pr-sets/{id}", s.handleGetPRSet)
 
 	// Dashboard API
 	s.mux.HandleFunc("GET /api/dashboard/tasks", s.handleDashboardTasks)
 	s.mux.HandleFunc("GET /api/dashboard/worktrees", s.handleDashboardWorktrees)
 	s.mux.HandleFunc("GET /api/dashboard/memory-stats", s.handleDashboardMemoryStats)
+	s.mux.HandleFunc("GET /api/dashboard/sync", s.handleDashboardSync)
 
 	// Flock Agent API
 	s.mux.HandleFunc("GET /api/flock-agent", s.handleGetFlockAgentSession)
