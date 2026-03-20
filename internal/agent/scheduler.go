@@ -17,6 +17,7 @@ type Scheduler struct {
 	cfg          AgentConfig
 	orchestrator *Orchestrator
 	processor    *DecisionProcessor
+	cleaner      *WorktreeCleaner
 	queries      *sqlc.Queries
 	client       *opencode.Client
 	cancel       context.CancelFunc
@@ -27,6 +28,7 @@ func NewScheduler(
 	cfg AgentConfig,
 	orchestrator *Orchestrator,
 	processor *DecisionProcessor,
+	cleaner *WorktreeCleaner,
 	queries *sqlc.Queries,
 	client *opencode.Client,
 ) *Scheduler {
@@ -36,6 +38,7 @@ func NewScheduler(
 		cfg:          cfg,
 		orchestrator: orchestrator,
 		processor:    processor,
+		cleaner:      cleaner,
 		queries:      queries,
 		client:       client,
 	}
@@ -101,6 +104,16 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 
 	// 3. Check for stuck tasks and mark them
 	s.checkStuckTasks(ctx)
+
+	// 4. Run worktree cleanup for completed/abandoned tasks
+	if s.cleaner != nil {
+		results := s.cleaner.RunCleanup(ctx, s.instanceID)
+		for _, r := range results {
+			if r.Action == "failed" {
+				log.Printf("agent: cleanup failed for task %s: %v", truncID(r.TaskID), r.Error)
+			}
+		}
+	}
 }
 
 func (s *Scheduler) checkStuckTasks(ctx context.Context) {

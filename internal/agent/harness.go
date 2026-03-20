@@ -120,7 +120,8 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 
 	orch := NewOrchestrator(h.client, h.queries, instanceID, h.dataDir, org, repo, h.cfg, h.subscribeFn)
 	proc := NewDecisionProcessor(h.client, h.queries, h.dataDir, instanceID, org, repo, h.cfg)
-	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, h.queries, h.client)
+	cleaner := NewWorktreeCleaner(h.queries, h.dataDir, org, repo)
+	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, cleaner, h.queries, h.client)
 	sched.Start(h.ctx)
 
 	h.schedulers[instanceID] = sched

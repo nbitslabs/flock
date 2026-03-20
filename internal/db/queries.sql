@@ -93,6 +93,12 @@ SELECT * FROM tasks
 WHERE instance_id = ? AND status = 'active'
 AND last_activity_at < datetime('now', '-' || cast(? as text) || ' seconds');
 
+-- name: ListCompletedTasks :many
+SELECT * FROM tasks WHERE instance_id = ? AND status = 'completed' ORDER BY updated_at ASC;
+
+-- name: ListFailedTasks :many
+SELECT * FROM tasks WHERE instance_id = ? AND status IN ('failed', 'stuck') ORDER BY last_activity_at ASC;
+
 -- name: DeleteTasksByInstance :exec
 DELETE FROM tasks WHERE instance_id = ?;
 

@@ -571,6 +571,86 @@ func (q *Queries) ListActiveTasks(ctx context.Context, instanceID string) ([]Tas
 	return items, nil
 }
 
+const listCompletedTasks = `-- name: ListCompletedTasks :many
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? AND status = 'completed' ORDER BY updated_at ASC
+`
+
+func (q *Queries) ListCompletedTasks(ctx context.Context, instanceID string) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, listCompletedTasks, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.IssueNumber,
+			&i.IssueUrl,
+			&i.Title,
+			&i.Status,
+			&i.SessionID,
+			&i.BranchName,
+			&i.PrUrl,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFailedTasks = `-- name: ListFailedTasks :many
+SELECT id, instance_id, issue_number, issue_url, title, status, session_id, branch_name, pr_url, last_activity_at, created_at, updated_at FROM tasks WHERE instance_id = ? AND status IN ('failed', 'stuck') ORDER BY last_activity_at ASC
+`
+
+func (q *Queries) ListFailedTasks(ctx context.Context, instanceID string) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, listFailedTasks, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstanceID,
+			&i.IssueNumber,
+			&i.IssueUrl,
+			&i.Title,
+			&i.Status,
+			&i.SessionID,
+			&i.BranchName,
+			&i.PrUrl,
+			&i.LastActivityAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInstances = `-- name: ListInstances :many
 SELECT id, pid, port, working_directory, status, created_at, updated_at, heartbeat_hash, org, repo FROM instances WHERE id != 'flock-agent' ORDER BY created_at DESC
 `
