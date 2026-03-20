@@ -122,7 +122,8 @@ func (h *Harness) StartInstance(instanceID, workingDir string) {
 	proc := NewDecisionProcessor(h.client, h.queries, h.dataDir, instanceID, org, repo, h.cfg)
 	cleaner := NewWorktreeCleaner(h.queries, h.dataDir, instanceID, org, repo)
 	healthChecker := NewHealthChecker(h.queries, instanceID, h.dataDir)
-	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, cleaner, healthChecker, h.queries, h.client)
+	recovery := NewWorktreeRecovery(h.queries, instanceID, h.dataDir, org, repo, workingDir)
+	sched := NewScheduler(instanceID, h.dataDir, h.cfg, orch, proc, cleaner, healthChecker, recovery, h.queries, h.client)
 	sched.Start(h.ctx)
 
 	h.schedulers[instanceID] = sched

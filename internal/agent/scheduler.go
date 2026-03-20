@@ -19,6 +19,7 @@ type Scheduler struct {
 	processor     *DecisionProcessor
 	cleaner       *WorktreeCleaner
 	healthChecker *HealthChecker
+	recovery      *WorktreeRecovery
 	queries       *sqlc.Queries
 	client        *opencode.Client
 	cancel        context.CancelFunc
@@ -32,6 +33,7 @@ func NewScheduler(
 	processor *DecisionProcessor,
 	cleaner *WorktreeCleaner,
 	healthChecker *HealthChecker,
+	recovery *WorktreeRecovery,
 	queries *sqlc.Queries,
 	client *opencode.Client,
 ) *Scheduler {
@@ -43,6 +45,7 @@ func NewScheduler(
 		processor:     processor,
 		cleaner:       cleaner,
 		healthChecker: healthChecker,
+		recovery:      recovery,
 		queries:       queries,
 		client:        client,
 	}
@@ -128,6 +131,15 @@ func (s *Scheduler) doHeartbeat(ctx context.Context) {
 			if r.Status == "corrupted" || r.Status == "missing" {
 				log.Printf("agent: healthcheck: worktree %s is %s: %s",
 					truncID(r.WorktreeID), r.Status, r.ErrorMessage)
+			}
+		}
+
+		// 6. Attempt recovery for corrupted/missing worktrees
+		if s.recovery != nil {
+			recoveryActions := s.recovery.RecoverCorruptedWorktrees(ctx, results)
+			for _, a := range recoveryActions {
+				log.Printf("agent: recovery: worktree %s (branch %s) → %s: %s",
+					truncID(a.WorktreeID), a.BranchName, a.Action, a.Details)
 			}
 		}
 	}
