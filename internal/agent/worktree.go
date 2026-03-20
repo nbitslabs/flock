@@ -15,9 +15,12 @@ import (
 func EnsureWorktree(dataDir, org, repo, branchName, sourceRepoPath string) (string, error) {
 	wtPath := memory.RepoWorktreePath(dataDir, org, repo, branchName)
 
-	// If the worktree directory already exists, just return it
+	// If the worktree directory already exists, ensure filter is installed and return
 	if info, err := os.Stat(wtPath); err == nil && info.IsDir() {
 		log.Printf("agent: worktree already exists at %s", wtPath)
+		if err := installGitFilter(wtPath, branchName); err != nil {
+			log.Printf("agent: warning: failed to install git filter at %s: %v", wtPath, err)
+		}
 		return wtPath, nil
 	}
 
@@ -41,6 +44,13 @@ func EnsureWorktree(dataDir, org, repo, branchName, sourceRepoPath string) (stri
 	}
 
 	log.Printf("agent: created worktree at %s for branch %s", wtPath, branchName)
+
+	// Install git command filter for worktree isolation
+	if err := installGitFilter(wtPath, branchName); err != nil {
+		log.Printf("agent: warning: failed to install git filter at %s: %v", wtPath, err)
+		// Non-fatal — the worktree is still usable without the filter
+	}
+
 	return wtPath, nil
 }
 
