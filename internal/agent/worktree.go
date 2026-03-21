@@ -55,17 +55,32 @@ func EnsureWorktree(dataDir, org, repo, branchName, sourceRepoPath string) (stri
 }
 
 // RemoveWorktree removes a git worktree at the repo-based path.
-func RemoveWorktree(dataDir, org, repo, branchName string) error {
+// sourceRepoPath is the main git checkout that owns the worktree.
+func RemoveWorktree(dataDir, org, repo, branchName, sourceRepoPath string) error {
 	wtPath := memory.RepoWorktreePath(dataDir, org, repo, branchName)
 
 	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
+		// Directory gone — just prune git's stale tracking
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = sourceRepoPath
+		pruneCmd.CombinedOutput()
 		return nil
 	}
 
 	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+	cmd.Dir = sourceRepoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git worktree remove failed: %w, output: %s", err, string(output))
+		// If git doesn't recognize it as a worktree, remove the directory
+		// and prune. This happens when the worktree tracking gets out of sync.
+		if err2 := os.RemoveAll(wtPath); err2 != nil {
+			return fmt.Errorf("git worktree remove failed (%s) and fallback rm failed: %w", string(output), err2)
+		}
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = sourceRepoPath
+		pruneCmd.CombinedOutput()
+		log.Printf("agent: removed orphaned worktree directory at %s", wtPath)
+		return nil
 	}
 
 	log.Printf("agent: removed worktree at %s", wtPath)

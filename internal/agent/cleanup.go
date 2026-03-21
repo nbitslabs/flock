@@ -144,61 +144,57 @@ func (wc *WorktreeCleaner) cleanupAbandonedTask(task sqlc.Task) CleanupResult {
 	return wc.doCleanup(task)
 }
 
-// doCleanup performs the actual worktree removal with uncommitted-changes check
-// and retry logic.
+// doCleanup performs the actual worktree removal with uncommitted-changes check.
 func (wc *WorktreeCleaner) doCleanup(task sqlc.Task) CleanupResult {
 	result := CleanupResult{
 		TaskID:     task.ID,
 		BranchName: task.BranchName,
 	}
 
+	// Look up the source repo path
+	instance, err := wc.queries.GetInstance(context.Background(), wc.instanceID)
+	if err != nil {
+		result.Action = "failed"
+		result.Error = fmt.Errorf("get instance for source repo: %w", err)
+		return result
+	}
+	sourceRepoPath := instance.WorkingDirectory
+
 	wtPath := memory.RepoWorktreePath(wc.dataDir, wc.org, wc.repo, task.BranchName)
 
-	// Check if worktree still exists
+	// Check if worktree still exists on disk
 	if _, err := os.Stat(wtPath); os.IsNotExist(err) {
 		result.Action = "removed"
 		log.Printf("agent: cleanup: worktree for task %s already gone", truncID(task.ID))
+		// Prune stale git tracking
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = sourceRepoPath
+		pruneCmd.CombinedOutput()
+		RecordWorktreeDeletion(context.Background(), wc.queries, wc.instanceID, task.BranchName, task.Status)
 		return result
 	}
 
 	// Check for uncommitted changes
 	if hasUncommitted, err := hasUncommittedChanges(wtPath); err != nil {
 		log.Printf("agent: cleanup: failed to check uncommitted changes for %s: %v", truncID(task.ID), err)
+		// Non-fatal — proceed with removal attempt
 	} else if hasUncommitted {
 		result.Action = "skipped_uncommitted"
 		log.Printf("agent: cleanup: task %s has uncommitted changes, marking for manual review", truncID(task.ID))
 		return result
 	}
 
-	// Attempt removal with retries and exponential backoff
-	var lastErr error
-	for attempt := 0; attempt < MaxCleanupRetries; attempt++ {
-		if attempt > 0 {
-			backoff := time.Duration(1<<uint(attempt)) * time.Second
-			log.Printf("agent: cleanup: retrying removal of %s (attempt %d, backoff %s)",
-				truncID(task.ID), attempt+1, backoff)
-			time.Sleep(backoff)
-		}
-
-		if err := RemoveWorktree(wc.dataDir, wc.org, wc.repo, task.BranchName); err != nil {
-			lastErr = err
-			log.Printf("agent: cleanup: removal attempt %d failed for task %s: %v",
-				attempt+1, truncID(task.ID), err)
-			continue
-		}
-
-		result.Action = "removed"
-		log.Printf("agent: cleanup: removed worktree for task %s (branch %s)",
-			truncID(task.ID), task.BranchName)
-		// Record deletion in metadata
-		RecordWorktreeDeletion(context.Background(), wc.queries, wc.instanceID, task.BranchName, task.Status)
+	if err := RemoveWorktree(wc.dataDir, wc.org, wc.repo, task.BranchName, sourceRepoPath); err != nil {
+		result.Action = "failed"
+		result.Error = err
+		log.Printf("agent: cleanup: removal failed for task %s: %v", truncID(task.ID), err)
 		return result
 	}
 
-	result.Action = "failed"
-	result.Error = fmt.Errorf("cleanup failed after %d retries: %w", MaxCleanupRetries, lastErr)
-	log.Printf("agent: cleanup: giving up on task %s after %d retries: %v",
-		truncID(task.ID), MaxCleanupRetries, lastErr)
+	result.Action = "removed"
+	log.Printf("agent: cleanup: removed worktree for task %s (branch %s)",
+		truncID(task.ID), task.BranchName)
+	RecordWorktreeDeletion(context.Background(), wc.queries, wc.instanceID, task.BranchName, task.Status)
 	return result
 }
 
