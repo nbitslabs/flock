@@ -220,49 +220,38 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 	decisionsPath := memory.RepoDecisionsPath(o.dataDir, o.org, o.repo)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\nRepo state: `%s`\n\n", workingDir, repoStatePath))
+	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\nRepo state: `%s`\nDecisions: `%s`\n\n", workingDir, repoStatePath, decisionsPath))
 
-	// Include tracked tasks
-	tasks, err := o.queries.ListActiveTasks(ctx, o.instanceID)
-	if err == nil && len(tasks) > 0 {
-		sb.WriteString("## Active Tasks\n\n")
-		for _, t := range tasks {
-			line := fmt.Sprintf("- **#%d** %s (status: %s, task_id: %s, branch: %s",
-				t.IssueNumber, t.Title, t.Status, t.ID, t.BranchName)
-			if t.PrUrl != "" {
-				line += fmt.Sprintf(", pr_url: %s", t.PrUrl)
-			}
-			line += ")\n"
-			sb.WriteString(line)
-		}
-		sb.WriteString("\n")
-	} else {
-		sb.WriteString("## Active Tasks\nNo active tasks.\n\n")
-	}
-
-	// Include stuck tasks
-	stuckTasks, err := o.queries.ListStuckTasks(ctx, sqlc.ListStuckTasksParams{
+	// Task count summaries instead of full listings
+	activeCount, _ := o.queries.CountActiveTasksByInstance(ctx, o.instanceID)
+	stuckTasks, _ := o.queries.ListStuckTasks(ctx, sqlc.ListStuckTasksParams{
 		InstanceID: o.instanceID,
 		Column2:    fmt.Sprintf("%d", o.cfg.StuckThresholdSecs),
 	})
-	if err == nil && len(stuckTasks) > 0 {
-		sb.WriteString("## Stuck Tasks (no activity)\n\n")
+	stuckCount := len(stuckTasks)
+
+	sb.WriteString(fmt.Sprintf("## Current State\n\nActive tasks: %d\nStuck tasks: %d\n", activeCount, stuckCount))
+
+	// Include last heartbeat timestamp
+	lastHB, err := o.queries.GetLastHeartbeatByInstance(ctx, o.instanceID)
+	if err == nil && lastHB != "" {
+		sb.WriteString(fmt.Sprintf("Last heartbeat: %s\n", lastHB))
+	}
+	sb.WriteString("\n")
+
+	// Include stuck task IDs so orchestrator can act on them
+	if stuckCount > 0 {
+		sb.WriteString("### Stuck Tasks\n")
 		for _, t := range stuckTasks {
-			sb.WriteString(fmt.Sprintf("- **#%d** %s (last activity: %s, task_id: %s)\n",
-				t.IssueNumber, t.Title, t.LastActivityAt, t.ID))
+			sb.WriteString(fmt.Sprintf("- #%d %s (task_id: %s, last: %s)\n",
+				t.IssueNumber, t.Title, t.ID, t.LastActivityAt))
 		}
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("## Instructions\n")
-	sb.WriteString("1. Run `gh issue list --assignee=@me --state=open --json number,url,title`\n")
-	sb.WriteString("2. For each active/stuck task above, check if its issue is closed: `gh issue view <number> --json state -q .state`\n")
-	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged: `gh pr view <pr_url> --json state -q .state`\n")
-	sb.WriteString(fmt.Sprintf("4. Write `%s/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n", decisionsPath))
-	sb.WriteString(fmt.Sprintf("5. Compare issue list with active tasks and write `%s/new_tasks.json` for new issues\n", decisionsPath))
-	sb.WriteString(fmt.Sprintf("6. Write `%s/restart_tasks.json` for stuck tasks needing restart\n", decisionsPath))
-	sb.WriteString(fmt.Sprintf("7. Update `%s/MEMORY.md` with any observations\n", repoStatePath))
-	sb.WriteString("8. For each completed task, invoke the `@flock-self-reflect` subagent to update memory (see HEARTBEAT.md for details)\n")
+	sb.WriteString("Follow the steps in your HEARTBEAT.md instructions.\n")
+	sb.WriteString("For detailed task history, spawn `@flock-history-analyzer` with your query.\n")
 
 	return sb.String()
 }
