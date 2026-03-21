@@ -163,7 +163,14 @@ func (o *Orchestrator) composeBootstrapMessage() string {
 		"## Key Paths\n"+
 		"- Repo state: `%s`\n"+
 		"- Decisions: `%s`\n"+
-		"- Memory: `%s/MEMORY.md`\n\n%s"+
+		"- Memory: `%s/MEMORY.md`\n\n"+
+		"## Available Agents\n"+
+		"- `@flock-history-analyzer` — For historical analysis. Spawn with a query like "+
+		"\"What happened with issue #42?\" or \"List PRs merged this week\". "+
+		"Use this instead of browsing git history manually.\n"+
+		"- `@flock-self-reflect` — Invoke for completed tasks to update memory.\n"+
+		"- `@flock-implementation-agent` — Sub-agents handle issue resolution.\n\n"+
+		"%s"+
 		"Acknowledge that you understand your role.",
 		workingDir, repoStatePath, decisionsPath, repoStatePath, sb.String())
 }
