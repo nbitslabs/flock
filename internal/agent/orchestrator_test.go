@@ -6,36 +6,27 @@ import (
 	"testing"
 )
 
-// composeHeartbeatMessageSized simulates the NEW composeHeartbeatMessage output
-// for different task counts to verify consistent message size.
-func composeHeartbeatMessageSized(activeCount, stuckCount int, stuckTasks []struct{ num int; title, id, lastActivity string }) string {
+// simulateHeartbeat mirrors the actual composeHeartbeatMessage output format.
+func simulateHeartbeat(activeCount int, stuckTasks []struct{ num int; id, lastActivity string }) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `/tmp/test`\nRepo state: `/tmp/.flock/state/github.com/org/repo`\nDecisions: `/tmp/.flock/state/github.com/org/repo/decisions`\n\n"))
+	sb.WriteString(fmt.Sprintf("Heartbeat: active=%d stuck=%d decisions=`/tmp/decisions`\n", activeCount, len(stuckTasks)))
 
-	sb.WriteString(fmt.Sprintf("## Current State\n\nActive tasks: %d\nStuck tasks: %d\n", activeCount, stuckCount))
-	sb.WriteString("Last heartbeat: 2026-03-21T00:00:00Z\n\n")
-
-	if stuckCount > 0 && len(stuckTasks) > 0 {
-		sb.WriteString("### Stuck Tasks\n")
+	if len(stuckTasks) > 0 {
+		sb.WriteString("Stuck:")
 		for _, t := range stuckTasks {
-			sb.WriteString(fmt.Sprintf("- #%d %s (task_id: %s, last: %s)\n",
-				t.num, t.title, t.id, t.lastActivity))
+			sb.WriteString(fmt.Sprintf(" #%d(%s,last:%s)", t.num, t.id, t.lastActivity))
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("## Instructions\n")
-	sb.WriteString("Follow the steps in your HEARTBEAT.md instructions.\n")
-	sb.WriteString("For detailed task history, spawn `@flock-history-analyzer` with your query.\n")
-
+	sb.WriteString("Run your HEARTBEAT.md steps now.")
 	return sb.String()
 }
 
-// composeOldHeartbeatMessage simulates the OLD composeHeartbeatMessage that
-// included full task listings. Used to measure context savings.
-func composeOldHeartbeatMessage(tasks []struct{ num int; title, status, id, branch, prUrl string }, stuckTasks []struct{ num int; title, id, lastActivity string }) string {
+// simulateOldHeartbeat mirrors the old verbose format for savings comparison.
+func simulateOldHeartbeat(tasks []struct{ num int; title, status, id, branch, prUrl string }, stuckTasks []struct{ num int; id, lastActivity string }) string {
 	var sb strings.Builder
-	sb.WriteString("# Heartbeat\n\nWorking directory: `/tmp/test`\nRepo state: `/tmp/.flock/state/github.com/org/repo`\n\n")
+	sb.WriteString("# Heartbeat\n\nWorking directory: `/tmp/test`\nRepo state: `/tmp/.flock/state/github.com/org/repo`\nDecisions: `/tmp/decisions`\n\n")
 
 	if len(tasks) > 0 {
 		sb.WriteString("## Active Tasks\n\n")
@@ -56,26 +47,22 @@ func composeOldHeartbeatMessage(tasks []struct{ num int; title, status, id, bran
 	if len(stuckTasks) > 0 {
 		sb.WriteString("## Stuck Tasks (no activity)\n\n")
 		for _, t := range stuckTasks {
-			sb.WriteString(fmt.Sprintf("- **#%d** %s (last activity: %s, task_id: %s)\n",
-				t.num, t.title, t.lastActivity, t.id))
+			sb.WriteString(fmt.Sprintf("- **#%d** (last activity: %s, task_id: %s)\n",
+				t.num, t.lastActivity, t.id))
 		}
 		sb.WriteString("\n")
 	}
 
 	sb.WriteString("## Instructions\n")
 	sb.WriteString("1. Run `gh issue list --assignee=@me --state=open --json number,url,title`\n")
-	sb.WriteString("2. For each active/stuck task above, check if its issue is closed: `gh issue view <number> --json state -q .state`\n")
-	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged: `gh pr view <pr_url> --json state -q .state`\n")
-	sb.WriteString("4. Write `/tmp/.flock/state/github.com/org/repo/decisions/completed_tasks.json` for tasks whose issues are closed or PRs are merged\n")
-	sb.WriteString("5. Compare issue list with active tasks and write `/tmp/.flock/state/github.com/org/repo/decisions/new_tasks.json` for new issues\n")
-	sb.WriteString("6. Write `/tmp/.flock/state/github.com/org/repo/decisions/restart_tasks.json` for stuck tasks needing restart\n")
-	sb.WriteString("7. Update `/tmp/.flock/state/github.com/org/repo/MEMORY.md` with any observations\n")
-	sb.WriteString("8. For each completed task, invoke the `@flock-self-reflect` subagent to update memory (see HEARTBEAT.md for details)\n")
+	sb.WriteString("2. For each active/stuck task above, check if its issue is closed\n")
+	sb.WriteString("3. If the issue is open but the task has a pr_url, check if the PR is merged\n")
+	sb.WriteString("4. Write completed_tasks.json, new_tasks.json, restart_tasks.json\n")
+	sb.WriteString("5. Update MEMORY.md with any observations\n")
 
 	return sb.String()
 }
 
-// makeTasks generates N simulated tasks for testing.
 func makeTasks(n int) []struct{ num int; title, status, id, branch, prUrl string } {
 	tasks := make([]struct{ num int; title, status, id, branch, prUrl string }, n)
 	for i := 0; i < n; i++ {
@@ -91,12 +78,11 @@ func makeTasks(n int) []struct{ num int; title, status, id, branch, prUrl string
 	return tasks
 }
 
-func makeStuckTasks(n int) []struct{ num int; title, id, lastActivity string } {
-	tasks := make([]struct{ num int; title, id, lastActivity string }, n)
+func makeStuckTasks(n int) []struct{ num int; id, lastActivity string } {
+	tasks := make([]struct{ num int; id, lastActivity string }, n)
 	for i := 0; i < n; i++ {
-		tasks[i] = struct{ num int; title, id, lastActivity string }{
+		tasks[i] = struct{ num int; id, lastActivity string }{
 			num:          i + 100,
-			title:        fmt.Sprintf("Stuck task %d", i+1),
 			id:           fmt.Sprintf("stuck-%04d", i+1),
 			lastActivity: "2026-03-20T12:00:00Z",
 		}
@@ -105,91 +91,78 @@ func makeStuckTasks(n int) []struct{ num int; title, id, lastActivity string } {
 }
 
 func TestHeartbeatMessageConsistentSize(t *testing.T) {
-	msg0 := composeHeartbeatMessageSized(0, 0, nil)
-	msg1 := composeHeartbeatMessageSized(1, 0, nil)
-	msg10 := composeHeartbeatMessageSized(10, 0, nil)
-	msg50 := composeHeartbeatMessageSized(50, 0, nil)
+	msg0 := simulateHeartbeat(0, nil)
+	msg1 := simulateHeartbeat(1, nil)
+	msg10 := simulateHeartbeat(10, nil)
+	msg50 := simulateHeartbeat(50, nil)
 
-	lines0 := len(strings.Split(msg0, "\n"))
-	lines1 := len(strings.Split(msg1, "\n"))
-	lines10 := len(strings.Split(msg10, "\n"))
-	lines50 := len(strings.Split(msg50, "\n"))
-
-	// Line counts should be identical when no stuck tasks
-	if lines0 != lines1 || lines1 != lines10 || lines10 != lines50 {
-		t.Errorf("line counts differ: 0=%d, 1=%d, 10=%d, 50=%d", lines0, lines1, lines10, lines50)
-	}
-
-	if lines0 > 50 {
-		t.Errorf("message with 0 tasks is %d lines, want <=50", lines0)
-	}
-
+	// Without stuck tasks, size should barely differ (only digit count changes)
 	sizeDiff := len(msg50) - len(msg0)
-	if sizeDiff > 10 {
-		t.Errorf("size difference between 0 and 50 tasks is %d bytes, expected <10", sizeDiff)
+	if sizeDiff > 5 {
+		t.Errorf("size difference between 0 and 50 tasks is %d bytes, expected <5", sizeDiff)
+	}
+
+	// All should be very short — under 5 lines
+	for _, msg := range []string{msg0, msg1, msg10, msg50} {
+		lines := strings.Count(msg, "\n") + 1
+		if lines > 5 {
+			t.Errorf("message without stuck tasks is %d lines, want <=5", lines)
+		}
 	}
 }
 
 func TestHeartbeatMessageWithStuckTasks(t *testing.T) {
 	stuck := makeStuckTasks(2)
+	msg := simulateHeartbeat(5, stuck)
 
-	msg := composeHeartbeatMessageSized(5, 2, stuck)
-
-	if !strings.Contains(msg, "Active tasks: 5") {
-		t.Error("expected active task count")
+	if !strings.Contains(msg, "active=5") {
+		t.Error("expected active count")
 	}
-	if !strings.Contains(msg, "Stuck tasks: 2") {
-		t.Error("expected stuck task count")
+	if !strings.Contains(msg, "stuck=2") {
+		t.Error("expected stuck count")
 	}
-	if !strings.Contains(msg, "#100 Stuck task 1") {
+	if !strings.Contains(msg, "#100(stuck-0001") {
 		t.Error("expected stuck task details")
 	}
-	if !strings.Contains(msg, "@flock-history-analyzer") {
-		t.Error("expected history analyzer reference")
+	if !strings.Contains(msg, "HEARTBEAT.md") {
+		t.Error("expected HEARTBEAT.md reference")
 	}
 
-	lines := len(strings.Split(msg, "\n"))
-	if lines > 50 {
-		t.Errorf("message with stuck tasks is %d lines, want <=50", lines)
+	lines := strings.Count(msg, "\n") + 1
+	if lines > 5 {
+		t.Errorf("message with 2 stuck tasks is %d lines, want <=5", lines)
 	}
 }
 
 func TestHeartbeatMessageFormat(t *testing.T) {
-	msg := composeHeartbeatMessageSized(3, 0, nil)
+	msg := simulateHeartbeat(3, nil)
 
 	required := []string{
-		"# Heartbeat",
-		"Working directory:",
-		"Repo state:",
-		"Decisions:",
-		"## Current State",
-		"Active tasks:",
-		"Stuck tasks:",
-		"## Instructions",
+		"Heartbeat:",
+		"active=",
+		"stuck=",
+		"decisions=",
+		"HEARTBEAT.md",
 	}
-	for _, section := range required {
-		if !strings.Contains(msg, section) {
-			t.Errorf("missing required section: %q", section)
+	for _, s := range required {
+		if !strings.Contains(msg, s) {
+			t.Errorf("missing required content: %q", s)
 		}
 	}
 }
 
-// TestHeartbeatContextSavings measures the context window savings between
-// the old (full task listing) and new (count-based) heartbeat formats.
 func TestHeartbeatContextSavings(t *testing.T) {
 	tests := []struct {
 		name       string
 		taskCount  int
 		stuckCount int
-		minSaving  float64 // minimum expected reduction percentage
+		minSaving  float64
 	}{
-		{"0 tasks", 0, 0, 0},     // no savings with 0 tasks (new is slightly shorter anyway)
-		{"1 task", 1, 0, 30},     // even 1 task saves ~30%+
-		{"5 tasks", 5, 0, 50},    // 5 tasks saves significantly
-		{"10 tasks", 10, 0, 60},  // 10 tasks saves 60%+
-		{"20 tasks", 20, 0, 70},  // 20 tasks saves 70%+
-		{"50 tasks", 50, 0, 80},  // 50 tasks saves 80%+
-		{"50 tasks + 5 stuck", 50, 5, 70}, // with stuck tasks, still big savings
+		{"1 task", 1, 0, 80},
+		{"5 tasks", 5, 0, 90},
+		{"10 tasks", 10, 0, 93},
+		{"50 tasks", 50, 0, 98},
+		{"50 tasks + 5 stuck", 50, 5, 95},
 	}
 
 	for _, tc := range tests {
@@ -197,60 +170,46 @@ func TestHeartbeatContextSavings(t *testing.T) {
 			tasks := makeTasks(tc.taskCount)
 			stuck := makeStuckTasks(tc.stuckCount)
 
-			oldMsg := composeOldHeartbeatMessage(tasks, stuck)
-			newMsg := composeHeartbeatMessageSized(tc.taskCount, tc.stuckCount, stuck)
+			oldMsg := simulateOldHeartbeat(tasks, stuck)
+			newMsg := simulateHeartbeat(tc.taskCount, stuck)
 
 			oldSize := len(oldMsg)
 			newSize := len(newMsg)
 
-			saving := 0.0
-			if oldSize > 0 {
-				saving = float64(oldSize-newSize) / float64(oldSize) * 100
-			}
+			saving := float64(oldSize-newSize) / float64(oldSize) * 100
 
-			oldLines := len(strings.Split(oldMsg, "\n"))
-			newLines := len(strings.Split(newMsg, "\n"))
+			t.Logf("Old: %d bytes, New: %d bytes, Savings: %.1f%%", oldSize, newSize, saving)
 
-			t.Logf("Tasks: %d active, %d stuck", tc.taskCount, tc.stuckCount)
-			t.Logf("Old: %d bytes, %d lines", oldSize, oldLines)
-			t.Logf("New: %d bytes, %d lines", newSize, newLines)
-			t.Logf("Savings: %.1f%%", saving)
-
-			if tc.taskCount > 0 && saving < tc.minSaving {
+			if saving < tc.minSaving {
 				t.Errorf("expected at least %.0f%% savings, got %.1f%%", tc.minSaving, saving)
-			}
-
-			// New format should always be under 50 lines
-			if newLines > 50 {
-				t.Errorf("new format is %d lines, want <=50", newLines)
 			}
 		})
 	}
 }
 
-// TestDecisionFileFormatsPreserved ensures the heartbeat instructions still
-// reference decision files correctly.
-func TestDecisionFileFormatsPreserved(t *testing.T) {
-	msg := composeHeartbeatMessageSized(10, 0, nil)
+func TestBootstrapMessageConcise(t *testing.T) {
+	// Simulate the new bootstrap message format
+	bootstrap := fmt.Sprintf("You are the orchestrator for this repo. You will receive periodic heartbeat messages.\n\n"+
+		"Paths: working_dir=`/tmp/test` state=`/tmp/state` decisions=`/tmp/decisions`\n\n"+
+		"Read your instructions: `cat /tmp/state/HEARTBEAT.md`\n"+
+		"Read repo memory: `cat /tmp/state/MEMORY.md`\n\n"+
+		"Agents: `@flock-history-analyzer` (history queries), `@flock-self-reflect` (post-completion), `@flock-implementation-agent` (issue resolution).\n\n"+
+		"Read HEARTBEAT.md now, then acknowledge.")
 
-	// The new format refers orchestrator to HEARTBEAT.md for details
-	if !strings.Contains(msg, "HEARTBEAT.md") {
-		t.Error("should reference HEARTBEAT.md instructions")
+	lines := strings.Count(bootstrap, "\n") + 1
+	if lines > 15 {
+		t.Errorf("bootstrap is %d lines, want <=15", lines)
 	}
 
-	if !strings.Contains(msg, "@flock-history-analyzer") {
-		t.Error("should reference history analyzer agent")
+	if len(bootstrap) > 500 {
+		t.Errorf("bootstrap is %d bytes, want <=500", len(bootstrap))
 	}
-}
 
-// TestHeartbeatTargetLineCount verifies the new heartbeat stays within
-// the target of 30-50 lines regardless of task count.
-func TestHeartbeatTargetLineCount(t *testing.T) {
-	for _, count := range []int{0, 1, 5, 10, 25, 50, 100} {
-		msg := composeHeartbeatMessageSized(count, 0, nil)
-		lines := len(strings.Split(msg, "\n"))
-		if lines < 10 || lines > 50 {
-			t.Errorf("with %d tasks: got %d lines, want 10-50", count, lines)
-		}
+	// Must tell orchestrator to read files, not inline them
+	if !strings.Contains(bootstrap, "cat") {
+		t.Error("bootstrap should instruct orchestrator to read files")
+	}
+	if !strings.Contains(bootstrap, "HEARTBEAT.md") {
+		t.Error("bootstrap should reference HEARTBEAT.md")
 	}
 }

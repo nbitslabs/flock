@@ -128,51 +128,19 @@ func (o *Orchestrator) composeBootstrapMessage() string {
 	repoStatePath := memory.RepoStatePath(o.dataDir, o.org, o.repo)
 	decisionsPath := memory.RepoDecisionsPath(o.dataDir, o.org, o.repo)
 
-	var sb strings.Builder
-
-	heartbeat, err := memory.ReadRepoHeartbeat(o.dataDir, o.org, o.repo)
-	if err == nil && heartbeat != "" {
-		// Replace template placeholders with real paths so the orchestrator
-		// can act on the bootstrap message without waiting for a heartbeat.
-		heartbeat = strings.ReplaceAll(heartbeat, "{decisionsPath}", decisionsPath)
-		heartbeat = strings.ReplaceAll(heartbeat, "{repoStatePath}", repoStatePath)
-		sb.WriteString("# Heartbeat Instructions\n\n")
-		sb.WriteString(heartbeat)
-		sb.WriteString("\n\n")
-	}
-
-	repoMemory, err := memory.ReadRepoMemory(o.dataDir, o.org, o.repo)
-	if err == nil && repoMemory != "" {
-		sb.WriteString("# Repository Memory\n\n")
-		sb.WriteString(repoMemory)
-		sb.WriteString("\n\n")
-	}
-
-	if sb.Len() == 0 {
-		return ""
-	}
-
 	instance, err := o.queries.GetInstance(context.Background(), o.instanceID)
 	workingDir := ""
 	if err == nil {
 		workingDir = instance.WorkingDirectory
 	}
 
-	return fmt.Sprintf("You are the orchestrator AI. Read and internalize these instructions. "+
-		"You will receive periodic heartbeat messages. Your working directory is: %s\n\n"+
-		"## Key Paths\n"+
-		"- Repo state: `%s`\n"+
-		"- Decisions: `%s`\n"+
-		"- Memory: `%s/MEMORY.md`\n\n"+
-		"## Available Agents\n"+
-		"- `@flock-history-analyzer` — For historical analysis. Spawn with a query like "+
-		"\"What happened with issue #42?\" or \"List PRs merged this week\". "+
-		"Use this instead of browsing git history manually.\n"+
-		"- `@flock-self-reflect` — Invoke for completed tasks to update memory.\n"+
-		"- `@flock-implementation-agent` — Sub-agents handle issue resolution.\n\n"+
-		"%s"+
-		"Acknowledge that you understand your role.",
-		workingDir, repoStatePath, decisionsPath, repoStatePath, sb.String())
+	return fmt.Sprintf("You are the orchestrator for this repo. You will receive periodic heartbeat messages.\n\n"+
+		"Paths: working_dir=`%s` state=`%s` decisions=`%s`\n\n"+
+		"Read your instructions: `cat %s/HEARTBEAT.md`\n"+
+		"Read repo memory: `cat %s/MEMORY.md`\n\n"+
+		"Agents: `@flock-history-analyzer` (history queries), `@flock-self-reflect` (post-completion), `@flock-implementation-agent` (issue resolution).\n\n"+
+		"Read HEARTBEAT.md now, then acknowledge.",
+		workingDir, repoStatePath, decisionsPath, repoStatePath, repoStatePath)
 }
 
 // SendHeartbeat sends a heartbeat message to the orchestrator session and
@@ -217,48 +185,26 @@ func (o *Orchestrator) SendHeartbeat(ctx context.Context) error {
 }
 
 func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
-	instance, err := o.queries.GetInstance(ctx, o.instanceID)
-	workingDir := ""
-	if err == nil {
-		workingDir = instance.WorkingDirectory
-	}
-
-	repoStatePath := memory.RepoStatePath(o.dataDir, o.org, o.repo)
 	decisionsPath := memory.RepoDecisionsPath(o.dataDir, o.org, o.repo)
 
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Heartbeat\n\nWorking directory: `%s`\nRepo state: `%s`\nDecisions: `%s`\n\n", workingDir, repoStatePath, decisionsPath))
-
-	// Task count summaries instead of full listings
 	activeCount, _ := o.queries.CountActiveTasksByInstance(ctx, o.instanceID)
 	stuckTasks, _ := o.queries.ListStuckTasks(ctx, sqlc.ListStuckTasksParams{
 		InstanceID: o.instanceID,
 		Column2:    fmt.Sprintf("%d", o.cfg.StuckThresholdSecs),
 	})
-	stuckCount := len(stuckTasks)
 
-	sb.WriteString(fmt.Sprintf("## Current State\n\nActive tasks: %d\nStuck tasks: %d\n", activeCount, stuckCount))
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Heartbeat: active=%d stuck=%d decisions=`%s`\n", activeCount, len(stuckTasks), decisionsPath))
 
-	// Include last heartbeat timestamp
-	lastHB, err := o.queries.GetLastHeartbeatByInstance(ctx, o.instanceID)
-	if err == nil && lastHB != "" {
-		sb.WriteString(fmt.Sprintf("Last heartbeat: %s\n", lastHB))
-	}
-	sb.WriteString("\n")
-
-	// Include stuck task IDs so orchestrator can act on them
-	if stuckCount > 0 {
-		sb.WriteString("### Stuck Tasks\n")
+	if len(stuckTasks) > 0 {
+		sb.WriteString("Stuck:")
 		for _, t := range stuckTasks {
-			sb.WriteString(fmt.Sprintf("- #%d %s (task_id: %s, last: %s)\n",
-				t.IssueNumber, t.Title, t.ID, t.LastActivityAt))
+			sb.WriteString(fmt.Sprintf(" #%d(%s,last:%s)", t.IssueNumber, t.ID, t.LastActivityAt))
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("## Instructions\n")
-	sb.WriteString("Follow the steps in your HEARTBEAT.md instructions.\n")
-	sb.WriteString("For detailed task history, spawn `@flock-history-analyzer` with your query.\n")
+	sb.WriteString("Run your HEARTBEAT.md steps now.")
 
 	return sb.String()
 }
