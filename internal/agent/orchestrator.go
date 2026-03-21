@@ -193,8 +193,10 @@ func (o *Orchestrator) composeHeartbeatMessage(ctx context.Context) string {
 		Column2:    fmt.Sprintf("%d", o.cfg.StuckThresholdSecs),
 	})
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Heartbeat: active=%d stuck=%d decisions=`%s`\n", activeCount, len(stuckTasks), decisionsPath))
+	sb.WriteString(fmt.Sprintf("Heartbeat: ts=%s active=%d stuck=%d decisions=`%s`\n", now, activeCount, len(stuckTasks), decisionsPath))
 
 	if len(stuckTasks) > 0 {
 		sb.WriteString("Stuck:")

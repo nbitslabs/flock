@@ -9,7 +9,7 @@ import (
 // simulateHeartbeat mirrors the actual composeHeartbeatMessage output format.
 func simulateHeartbeat(activeCount int, stuckTasks []struct{ num int; id, lastActivity string }) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Heartbeat: active=%d stuck=%d decisions=`/tmp/decisions`\n", activeCount, len(stuckTasks)))
+	sb.WriteString(fmt.Sprintf("Heartbeat: ts=2026-03-21T00:00:00Z active=%d stuck=%d decisions=`/tmp/decisions`\n", activeCount, len(stuckTasks)))
 
 	if len(stuckTasks) > 0 {
 		sb.WriteString("Stuck:")
@@ -139,6 +139,7 @@ func TestHeartbeatMessageFormat(t *testing.T) {
 
 	required := []string{
 		"Heartbeat:",
+		"ts=",
 		"active=",
 		"stuck=",
 		"decisions=",
